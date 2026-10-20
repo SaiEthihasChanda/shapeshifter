@@ -12,7 +12,7 @@ from shapeshifter.core import Context
 from shapeshifter.native import legacy, ole, slides
 
 sys.path.insert(0, str(Path(__file__).parent))
-from legacy_fixtures import build_doc, build_ole, build_ppt, build_xls   # noqa: E402
+from legacy_fixtures import build_doc, build_msg, build_ole, build_ppt, build_xls   # noqa: E402
 from test_ocr import CFG                                                 # noqa: E402
 
 
@@ -146,3 +146,4 @@ class TestRoutes:
         for src, dst in (("doc", "epub"), ("doc", "rtf"), ("xls", "pdf"), ("xls", "docx"), ("ppt", "odp"), ("xls", "ods"),
                          ("doc", "csv"), ("ppt", "docx"), ("xls", "pptx")):
             assert planner.route(src, dst) is not None, (src, dst)
+

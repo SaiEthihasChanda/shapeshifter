@@ -169,7 +169,7 @@ def _probe_signatures(head: bytes, ext_fmt: str, size: int = 0) -> list[Candidat
             c.fmt = "wma"
     # OLE2 compound files: decide by extension (doc/xls/ppt/msi share the container)
     for c in out:
-        if c.fmt == "doc" and ext_fmt in ("xls", "ppt", "msi"):
+        if c.fmt == "doc" and ext_fmt in ("xls", "ppt", "msi", "msg"):
             c.fmt = ext_fmt
     return out
 

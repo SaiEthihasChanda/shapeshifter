@@ -1,11 +1,15 @@
-"""3D meshes: OBJ, STL (ASCII and binary) and PLY (ASCII and binary) <-> each other.
+"""3D meshes: OBJ, STL (ASCII and binary), PLY (ASCII and binary), glTF and GLB <-> each other.
 
 Geometry only (vertices + triangles); materials, normals and textures are dropped.
 """
 
 from __future__ import annotations
 
+import base64
+import json
+import math
 import struct
+from pathlib import Path
 
 from ..core import ConversionError
 from .registry import register
@@ -155,13 +159,177 @@ def write_ply(mesh: Mesh) -> bytes:
     return (head + body).encode()
 
 
-READERS = {"obj": read_obj, "stl": read_stl, "ply": read_ply}
-WRITERS = {"obj": write_obj, "stl": write_stl, "ply": write_ply}
+# ------------------------------------------------------------------ glTF / GLB
+
+COMPONENT = {5120: ("b", 1), 5121: ("B", 1), 5122: ("h", 2), 5123: ("H", 2), 5125: ("I", 4), 5126: ("f", 4)}
+TYPE_SIZE = {"SCALAR": 1, "VEC2": 2, "VEC3": 3, "VEC4": 4, "MAT4": 16}
+
+
+def _mat_mul(a, b):
+    return [[sum(a[i][k] * b[k][j] for k in range(4)) for j in range(4)] for i in range(4)]
+
+
+def _node_matrix(node: dict):
+    if "matrix" in node:
+        m = node["matrix"]                                           # column-major
+        return [[m[c * 4 + r] for c in range(4)] for r in range(4)]
+    t, q, sc = node.get("translation", [0, 0, 0]), node.get("rotation", [0, 0, 0, 1]), node.get("scale", [1, 1, 1])
+    x, y, z, w = q
+    r = [[1 - 2 * (y * y + z * z), 2 * (x * y - z * w), 2 * (x * z + y * w)],
+         [2 * (x * y + z * w), 1 - 2 * (x * x + z * z), 2 * (y * z - x * w)],
+         [2 * (x * z - y * w), 2 * (y * z + x * w), 1 - 2 * (x * x + y * y)]]
+    return [[r[i][0] * sc[0], r[i][1] * sc[1], r[i][2] * sc[2], t[i]] for i in range(3)] + [[0, 0, 0, 1]]
+
+
+def _accessor(gltf: dict, buffers: list[bytes], index: int) -> list:
+    acc = gltf["accessors"][index]
+    if "sparse" in acc:
+        raise ConversionError("This glTF uses sparse accessors, which aren't supported.")
+    fmt, size = COMPONENT[acc["componentType"]]
+    n = TYPE_SIZE[acc["type"]]
+    view = gltf["bufferViews"][acc["bufferView"]]
+    data = buffers[view["buffer"]]
+    start = view.get("byteOffset", 0) + acc.get("byteOffset", 0)
+    stride = view.get("byteStride") or size * n
+    out = []
+    for i in range(acc["count"]):
+        off = start + i * stride
+        out.append(struct.unpack_from(f"<{n}{fmt}", data, off))
+    return out
+
+
+def _gltf_to_mesh(gltf: dict, buffers: list[bytes]) -> Mesh:
+    if "KHR_draco_mesh_compression" in " ".join(gltf.get("extensionsRequired", [])):
+        raise ConversionError("This model uses Draco compression, which isn't supported.")
+    verts: list = []
+    faces: list = []
+
+    def add_mesh(mesh_index: int, matrix):
+        for prim in gltf["meshes"][mesh_index].get("primitives", []):
+            if "POSITION" not in prim.get("attributes", {}) or prim.get("mode", 4) not in (4, 5, 6):
+                continue
+            pos = _accessor(gltf, buffers, prim["attributes"]["POSITION"])
+            base = len(verts)
+            for x, y, z in pos:
+                verts.append(tuple(matrix[i][0] * x + matrix[i][1] * y + matrix[i][2] * z + matrix[i][3] for i in range(3)))
+            idx = [v[0] for v in _accessor(gltf, buffers, prim["indices"])] if "indices" in prim else list(range(len(pos)))
+            mode = prim.get("mode", 4)
+            if mode == 4:
+                tris = [(idx[i], idx[i + 1], idx[i + 2]) for i in range(0, len(idx) - 2, 3)]
+            elif mode == 5:
+                tris = [((idx[i], idx[i + 1], idx[i + 2]) if i % 2 == 0 else (idx[i + 1], idx[i], idx[i + 2]))
+                        for i in range(len(idx) - 2)]
+            else:
+                tris = [(idx[0], idx[i], idx[i + 1]) for i in range(1, len(idx) - 1)]
+            faces.extend((base + a, base + b, base + c) for a, b, c in tris)
+
+    def walk(node_index: int, parent, depth=0):
+        if depth > 64:
+            return
+        node = gltf["nodes"][node_index]
+        m = _mat_mul(parent, _node_matrix(node))
+        if "mesh" in node:
+            add_mesh(node["mesh"], m)
+        for child in node.get("children", []):
+            walk(child, m, depth + 1)
+
+    identity = [[1, 0, 0, 0], [0, 1, 0, 0], [0, 0, 1, 0], [0, 0, 0, 1]]
+    scenes = gltf.get("scenes") or []
+    roots = scenes[gltf.get("scene", 0)].get("nodes", []) if scenes else []
+    if roots:
+        for r in roots:
+            walk(r, identity)
+    elif gltf.get("nodes"):
+        for i in range(len(gltf["nodes"])):
+            walk(i, identity)
+    else:
+        for i in range(len(gltf.get("meshes", []))):
+            add_mesh(i, identity)
+    return verts, faces
+
+
+def read_glb(data: bytes, dirs=()) -> Mesh:
+    if data[:4] != b"glTF" or len(data) < 20:
+        raise ConversionError("Not a GLB file")
+    pos, json_chunk, bin_chunk = 12, None, b""
+    while pos + 8 <= len(data):
+        length, kind = struct.unpack_from("<II", data, pos)
+        body = data[pos + 8:pos + 8 + length]
+        if kind == 0x4E4F534A:
+            json_chunk = body
+        elif kind == 0x004E4942 and not bin_chunk:
+            bin_chunk = body
+        pos += 8 + length + (-length % 4)
+    if json_chunk is None:
+        raise ConversionError("The GLB has no scene description")
+    gltf = json.loads(json_chunk.decode("utf-8"))
+    buffers = [bin_chunk]
+    for extra in gltf.get("buffers", [])[1:]:
+        buffers.append(_load_uri(extra.get("uri", ""), dirs))
+    return _gltf_to_mesh(gltf, buffers)
+
+
+def _load_uri(uri: str, dirs) -> bytes:
+    if uri.startswith("data:"):
+        return base64.b64decode(uri.split(",", 1)[1])
+    from urllib.parse import unquote
+    for d in dirs or []:
+        f = Path(d) / unquote(uri)
+        if f.is_file():
+            return f.read_bytes()
+    raise ConversionError(f"The glTF refers to a file that wasn't found next to it: {uri}")
+
+
+def read_gltf(data: bytes, dirs=()) -> Mesh:
+    if data[:4] == b"glTF":
+        return read_glb(data, dirs)
+    gltf = json.loads(data.decode("utf-8-sig"))
+    buffers = [_load_uri(b.get("uri", ""), dirs) for b in gltf.get("buffers", [])]
+    return _gltf_to_mesh(gltf, buffers)
+
+
+def _gltf_parts(mesh: Mesh):
+    verts, faces = mesh
+    pos = b"".join(struct.pack("<3f", *v) for v in verts)
+    idx = b"".join(struct.pack("<3I", *f) for f in faces)
+    lo = [min(v[i] for v in verts) for i in range(3)]
+    hi = [max(v[i] for v in verts) for i in range(3)]
+    blob = pos + idx
+    doc = {"asset": {"version": "2.0", "generator": "ShapeShifter"}, "scene": 0, "scenes": [{"nodes": [0]}],
+           "nodes": [{"mesh": 0}], "meshes": [{"primitives": [{"attributes": {"POSITION": 0}, "indices": 1}]}],
+           "accessors": [{"bufferView": 0, "componentType": 5126, "count": len(verts), "type": "VEC3", "min": lo, "max": hi},
+                         {"bufferView": 1, "componentType": 5125, "count": len(faces) * 3, "type": "SCALAR"}],
+           "bufferViews": [{"buffer": 0, "byteOffset": 0, "byteLength": len(pos), "target": 34962},
+                           {"buffer": 0, "byteOffset": len(pos), "byteLength": len(idx), "target": 34963}],
+           "buffers": [{"byteLength": len(blob)}]}
+    return doc, blob
+
+
+def write_glb(mesh: Mesh) -> bytes:
+    doc, blob = _gltf_parts(mesh)
+    j = json.dumps(doc, separators=(",", ":")).encode()
+    j += b" " * (-len(j) % 4)
+    blob += b"\0" * (-len(blob) % 4)
+    total = 12 + 8 + len(j) + 8 + len(blob)
+    return (b"glTF" + struct.pack("<II", 2, total) + struct.pack("<II", len(j), 0x4E4F534A) + j
+            + struct.pack("<II", len(blob), 0x004E4942) + blob)
+
+
+def write_gltf(mesh: Mesh) -> bytes:
+    doc, blob = _gltf_parts(mesh)
+    doc["buffers"][0]["uri"] = "data:application/octet-stream;base64," + base64.b64encode(blob).decode()
+    return json.dumps(doc, indent=1).encode()
+
+
+READERS = {"obj": read_obj, "stl": read_stl, "ply": read_ply, "glb": read_glb, "gltf": read_gltf}
+WRITERS = {"obj": write_obj, "stl": write_stl, "ply": write_ply, "glb": write_glb, "gltf": write_gltf}
 
 
 @register(list(READERS), list(WRITERS))
 def convert(data: bytes, src, dst, ctx) -> bytes:
-    mesh = READERS[src](data)
+    mesh = read_gltf(data, list(getattr(ctx, "resource_dirs", []) or [])) if src in ("glb", "gltf") else READERS[src](data)
     if not mesh[1]:
         raise ConversionError("The model has no faces")
+    if not mesh[0]:
+        raise ConversionError("The model has no vertices")
     return WRITERS[dst](mesh)

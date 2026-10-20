@@ -50,6 +50,8 @@ def kind_of(path: Path) -> str | None:
         return "text"
     if fmt in DECKS:
         return "deck"
+    if fmt == "ttf":
+        return "font"
     if fmt in media.VIDEO:
         return "video"
     if fmt in media.AUDIO:
@@ -80,6 +82,8 @@ def targets_for(paths) -> list[str]:
         return ["pdf", "docx", "md"]
     if kinds == {"deck"}:
         return ["pptx", "odp"]
+    if kinds == {"font"}:
+        return ["ttc"]
     if kinds == {"audio"} and media.ffmpeg_path():
         return [t for t in ("mp3", "m4a", "flac", "wav", "ogg", "opus") if media.ENCODE[t][0] in enc]
     if kinds == {"video"} and media.ffmpeg_path():
@@ -116,6 +120,9 @@ def run(paths: list[Path], fmt: str, dst: Path, ctx: Context) -> Path:
         _documents(paths, fmt, dst, ctx)
     elif kinds == {"deck"}:
         _decks(paths, fmt, dst, ctx)
+    elif kinds == {"font"}:
+        from .native.fonts import build_ttc
+        dst.write_bytes(build_ttc([p.read_bytes() for p in paths]))
     else:
         _join_media(paths, fmt, dst, ctx, video=(kinds == {"video"}))
     if not dst.exists() or dst.stat().st_size == 0:

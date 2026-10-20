@@ -6,7 +6,7 @@ from __future__ import annotations
 
 import re
 import struct
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 
 from . import docs
 from .ole import OleError, OleFile
@@ -361,6 +361,72 @@ def read_xls(data: bytes) -> dict[str, list[list]]:
     if not out:
         raise LegacyError("The workbook has no worksheets.")
     return out
+
+
+# ===================================================================== Outlook
+
+def msg_to_eml(data: bytes) -> bytes:
+    """An Outlook .msg message as an RFC 822 message (headers, text / HTML body, attachments)."""
+    import email.message
+    import email.utils
+    import mimetypes
+    try:
+        ole = OleFile(data)
+        streams = ole.streams()
+    except OleError as e:
+        raise LegacyError(f"Not an Outlook message ({e})") from e
+
+    def text(prefix: str, pid: int) -> str | None:
+        for suffix, enc in (("001F", "utf-16-le"), ("001E", "cp1252")):
+            name = f"{prefix}__substg1.0_{pid:04X}{suffix}"
+            if name in streams:
+                return ole.read(name).decode(enc, errors="replace").rstrip("\x00")
+        return None
+
+    def blob(prefix: str, pid: int) -> bytes | None:
+        name = f"{prefix}__substg1.0_{pid:04X}0102"
+        return ole.read(name) if name in streams else None
+
+    msg = email.message.EmailMessage()
+    headers = text("", 0x007D)
+    sender_name, sender_addr = text("", 0x0C1A), text("", 0x5D01) or text("", 0x0C1F)
+    if headers and "from:" in headers.lower():
+        parsed = email.message_from_string(headers)
+        for h in ("From", "To", "Cc", "Date", "Subject"):
+            if parsed[h]:
+                msg[h] = str(parsed[h]).replace("\r", "").replace("\n", " ")
+    if not msg["From"] and (sender_name or sender_addr):
+        msg["From"] = email.utils.formataddr((sender_name or "", sender_addr or "")) if sender_addr else sender_name
+    for header, pid in (("To", 0x0E04), ("Cc", 0x0E03)):
+        value = text("", pid)
+        if value and not msg[header]:
+            msg[header] = value.replace(";", ",")
+    if not msg["Subject"]:
+        msg["Subject"] = text("", 0x0037) or ""
+    if not msg["Date"] and "__properties_version1.0" in streams:
+        props = ole.read("__properties_version1.0")
+        for k in range(32, len(props) - 15, 16):
+            tag, _flags, value = struct.unpack_from("<IIQ", props, k)
+            if tag in (0x00390040, 0x0E060040) and value:
+                dt = datetime(1601, 1, 1) + timedelta(microseconds=value // 10)
+                msg["Date"] = email.utils.format_datetime(dt.replace(tzinfo=timezone.utc))
+                break
+    body = text("", 0x1000) or ""
+    html_raw = blob("", 0x1013)
+    html_body = html_raw.decode("utf-8", errors="replace") if html_raw else text("", 0x1013)
+    msg.set_content(body or (html_body and "(HTML message)") or "")
+    if html_body:
+        msg.add_alternative(html_body, subtype="html")
+    attach_prefixes = sorted({n.rsplit("/", 1)[0] + "/" for n in streams if n.startswith("__attach_version1.0_")})
+    for pre in attach_prefixes:
+        payload = blob(pre, 0x3701)
+        if payload is None:
+            continue
+        name = text(pre, 0x3707) or text(pre, 0x3704) or "attachment"
+        mime = text(pre, 0x370E) or mimetypes.guess_type(name)[0] or "application/octet-stream"
+        main, _, sub = mime.partition("/")
+        msg.add_attachment(payload, maintype=main or "application", subtype=sub or "octet-stream", filename=name)
+    return msg.as_bytes()
 
 
 # ================================================================= PowerPoint

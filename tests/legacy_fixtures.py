@@ -9,9 +9,12 @@ END, FREE, FATS = 0xFFFFFFFE, 0xFFFFFFFF, 0xFFFFFFFD
 
 
 def build_ole(streams: dict[str, bytes]) -> bytes:
-    """A compound file holding the given top-level streams."""
+    """A compound file holding the given streams; a name like "Storage/Stream" puts the stream in a storage."""
     ss, ms, cutoff = 512, 64, 4096
-    names = sorted(streams, key=lambda n: (len(n), n))
+    top = sorted({n.split("/")[0] for n in streams}, key=lambda n: (len(n), n))
+    storages = {t: sorted([n for n in streams if n.startswith(t + "/")], key=lambda n: (len(n), n)) for t in top
+                if any(n.startswith(t + "/") for n in streams)}
+    names = [n for n in streams]                      # every stream (full path)
     small = [n for n in names if len(streams[n]) < cutoff]
     big = [n for n in names if len(streams[n]) >= cutoff]
     # ---- mini stream
@@ -23,8 +26,19 @@ def build_ole(streams: dict[str, bytes]) -> bytes:
         for i in range(count):
             mini_fat.append(len(mini_fat) + 1 if i < count - 1 else END)
         mini += data + b"\0" * (count * ms - len(data))
-    # ---- sector layout: [FAT...][dir][minifat][ministream][big streams...]
-    n_entries = 1 + len(names)
+    # ---- directory layout: root, top-level entries, then each storage's children
+    entries_meta: list[tuple[str, str, str | None]] = []       # (display name, kind, full stream path)
+    index_of_top: dict[str, int] = {}
+    for t in top:
+        index_of_top[t] = 1 + len(entries_meta)
+        entries_meta.append((t, "storage" if t in storages else "stream", None if t in storages else t))
+    child_index: dict[str, list[int]] = {}
+    for t, members in storages.items():
+        child_index[t] = []
+        for full in members:
+            child_index[t].append(1 + len(entries_meta))
+            entries_meta.append((full.split("/", 1)[1], "stream", full))
+    n_entries = 1 + len(entries_meta)
     dir_sectors = -(-n_entries * 128 // ss)
     minifat_sectors = -(-len(mini_fat) * 4 // ss) if mini_fat else 0
     mini_sectors = -(-len(mini) // ss) if mini else 0
@@ -51,19 +65,38 @@ def build_ole(streams: dict[str, bytes]) -> bytes:
     minifat_start = chain(minifat_sectors)
     mini_start_sector = chain(mini_sectors)
     big_start = {n: chain(big_sectors[n]) for n in big}
-    # ---- directory
+
     def entry(name, kind, left, right, child, start, size):
         raw = name.encode("utf-16-le")
         return (raw.ljust(64, b"\0") + struct.pack("<HBB", len(raw) + 2 if name else 0, kind, 1)
                 + struct.pack("<III", left, right, child) + b"\0" * 16 + b"\0" * 4 + b"\0" * 16
                 + struct.pack("<I", start) + struct.pack("<Q", size))
-    dirs = [entry("Root Entry", 5, FREE, FREE, 1 if names else FREE, mini_start_sector if mini else END, len(mini))]
-    for i, n in enumerate(names):
-        right = i + 2 if i + 1 < len(names) else FREE
-        start = mini_start[n] if n in small else big_start[n]
-        dirs.append(entry(n, 2, FREE, right, FREE, start, len(streams[n])))
+
+    dirs = [entry("Root Entry", 5, FREE, FREE, 1 if top else FREE, mini_start_sector if mini else END, len(mini))]
+    pos = 0
+    for display, kind, full in entries_meta:
+        pos += 1
+        if kind == "storage":
+            kids = child_index[display]
+            right = FREE
+            dirs.append(None)                                          # filled below (needs sibling links)
+        else:
+            dirs.append(None)
+    # sibling links: top-level entries form a right-chain; each storage's children form their own
+    right_of: dict[int, int] = {}
+    for a_, b_ in zip([index_of_top[t] for t in top], [index_of_top[t] for t in top][1:]):
+        right_of[a_] = b_
+    for t, kids in child_index.items():
+        for a_, b_ in zip(kids, kids[1:]):
+            right_of[a_] = b_
+    for i, (display, kind, full) in enumerate(entries_meta, start=1):
+        right = right_of.get(i, FREE)
+        if kind == "storage":
+            dirs[i] = entry(display, 1, FREE, right, child_index[display][0], END, 0)
+        else:
+            start = mini_start[full] if full in small else big_start[full]
+            dirs[i] = entry(display, 2, FREE, right, FREE, start, len(streams[full]))
     dir_bytes = b"".join(dirs).ljust(dir_sectors * ss, b"\0")
-    # ---- header
     header = bytearray(512)
     header[0:8] = b"\xd0\xcf\x11\xe0\xa1\xb1\x1a\xe1"
     struct.pack_into("<HHHHH", header, 24, 0x3E, 3, 0xFFFE, 9, 6)
@@ -80,6 +113,28 @@ def build_ole(streams: dict[str, bytes]) -> bytes:
     for n in big:
         out += streams[n].ljust(big_sectors[n] * ss, b"\0")
     return bytes(out)
+
+
+def build_msg(subject: str, body: str, sender="Ada Lovelace", to="Charles Babbage", html: str | None = None,
+              attachments: list[tuple[str, bytes]] = ()) -> bytes:
+    """An Outlook message with Unicode text properties and attachment storages."""
+    def u(name: str, pid: int, value: str):
+        return {f"{name}__substg1.0_{pid:04X}001F": value.encode("utf-16-le")}
+    streams: dict[str, bytes] = {}
+    streams.update(u("", 0x0037, subject))
+    streams.update(u("", 0x1000, body))
+    streams.update(u("", 0x0C1A, sender))
+    streams.update(u("", 0x0E04, to))
+    if html:
+        streams["__substg1.0_10130102"] = html.encode("utf-8")
+    # properties stream: 32-byte header, then 16-byte fixed-size entries (here one date: 2023-03-15 12:00 UTC)
+    filetime = int((__import__("datetime").datetime(2023, 3, 15, 12) - __import__("datetime").datetime(1601, 1, 1)).total_seconds() * 10_000_000)
+    streams["__properties_version1.0"] = b"\0" * 32 + struct.pack("<IIQ", 0x00390040, 0, filetime)
+    for i, (name, data) in enumerate(attachments):
+        pre = f"__attach_version1.0_#{i:08X}/"
+        streams[f"{pre}__substg1.0_3707001F"] = name.encode("utf-16-le")
+        streams[f"{pre}__substg1.0_37010102"] = data
+    return build_ole(streams)
 
 
 # ------------------------------------------------------------------- Word

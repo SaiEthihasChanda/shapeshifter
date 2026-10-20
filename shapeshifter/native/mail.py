@@ -54,6 +54,22 @@ def message_text(msg) -> str:
     return f"{head}\n\n{plain.strip()}{tail}\n"
 
 
+@register("msg", "eml")
+def msg_to_eml(data: bytes, src, dst, ctx) -> bytes:
+    """Outlook messages (.msg) become standard e-mail, with their attachments; the rest of the e-mail
+    conversions (text, HTML, Markdown, PDF…) then work on them."""
+    from . import legacy
+    try:
+        return legacy.msg_to_eml(data)
+    except legacy.LegacyError as e:
+        raise ConversionError(str(e)) from e
+
+
+@register("msg", "txt")
+def msg_to_txt(data: bytes, src, dst, ctx) -> bytes:
+    return eml_to_txt(msg_to_eml(data, src, dst, ctx), src, dst, ctx)
+
+
 @register("eml", "txt")
 def eml_to_txt(data: bytes, src, dst, ctx) -> bytes:
     return message_text(_parse(data)).encode("utf-8")
