@@ -6,9 +6,12 @@
   PDFs are filled across all pages (answers laid over the page, real PDF form fields filled natively), and several
   forms can be opened at once.
   Also available as `shapeshifter fill`.
-- New **Word + picture** target for images: embeds the picture in a Word document (no OCR needed).
-- Options that come from reading the file's contents (OCR, Word + picture, OCR PDF, Fill form) now share one
-  **Inferred** group on the wheel.
+- **Targets that ask how.** DOCX and PDF are shown once; for a picture they can mean *Text (OCR)* / *Picture* (Word)
+  and *Picture* / *Searchable* (PDF). ShapeShifter looks inside the file first and only asks when there is a real
+  choice (a picture without text just converts). Back with the centre button or Esc.
+- New **Picture** way of making a Word document from an image: embeds the picture on a Word page (no OCR needed).
+- **OCR PDF** is only offered for PDFs that have scanned pages.
+- Options that only exist from reading the file (Fill form, OCR to TXT/Markdown/HTML) share one **Inferred** group.
 
 ## 2.3.0
 - Multi-ring wheel with rotating reveal animation and type-to-search.

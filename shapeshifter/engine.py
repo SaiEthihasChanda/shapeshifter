@@ -83,6 +83,7 @@ def options_for(path: str | Path, include_hidden_engine_targets: bool = False,
         opts += _learned_options(src, {o.key for o in opts})
         if _can_fill_forms(src):
             opts.append(TargetOption(key="fill", kind="fill"))
+        opts = _group_variants(path, src, opts)
     if ident.details.get("sensitive"):
         # Private keys & keystores: only re-encodings of the same secret, never documents.
         opts = [o for o in opts if o.kind in ("rename", "inspect") or o.fmt in SENSITIVE_OK]
@@ -92,6 +93,75 @@ def options_for(path: str | Path, include_hidden_engine_targets: bool = False,
 
 
 SENSITIVE_OK = {"pem", "der"}
+
+# One target, several behaviours. The wheel shows the target once; choosing it asks which way
+# (after looking inside the file, so it only asks when there's really a choice).
+VARIANT_GROUPS = {"docx": ("docxpic",), "pdf": ("pdfocr",)}
+VARIANT_TEXT = {
+    ("docx", "docx"): ("Text (OCR)", "Recognises the text so you can edit it. Pictures and layout aren't kept."),
+    ("docx", "docxpic"): ("Picture", "Puts the picture on a Word page so you can add text next to it."),
+    ("pdf", "pdf"): ("Picture", "A PDF page showing the picture."),
+    ("pdf", "pdfocr"): ("Searchable", "The same page plus an invisible text layer, so it can be searched and copied."),
+}
+
+
+def _group_variants(path, src: str, opts: list[TargetOption]) -> list[TargetOption]:
+    import dataclasses
+    by_key = {o.key: o for o in opts}
+    if src == "pdf" and "pdfocr" in by_key and not _is_scanned_pdf(path):
+        opts = [o for o in opts if o.key != "pdfocr"]          # "OCR PDF" only makes sense for scans
+        by_key.pop("pdfocr")
+    out = list(opts)
+    for base, extras in VARIANT_GROUPS.items():
+        present = [by_key[k] for k in (base, *extras) if k in by_key and by_key[k].kind == "convert"]
+        if len(present) < 2 or present[0].key != base:
+            continue
+        variants = tuple(dataclasses.replace(o, variant_label=VARIANT_TEXT[(base, o.key)][0],
+                                             variant_note=VARIANT_TEXT[(base, o.key)][1])
+                         for o in present)
+        top = dataclasses.replace(present[0], variants=variants, warnings=[])
+        out = [top if o.key == base else o for o in out if o.key not in extras]
+    return out
+
+
+def _is_scanned_pdf(path) -> bool:
+    """True if some page is only a picture (no text layer), so OCR would add something."""
+    try:
+        import pymupdf
+        with pymupdf.open(path) as doc:
+            if doc.needs_pass:
+                return False
+            for i, page in enumerate(doc):
+                if i >= 8:
+                    break
+                if not page.get_text("text").strip() and page.get_images():
+                    return True
+        return False
+    except Exception:                                             # noqa: BLE001 - can't tell: keep the option
+        return True
+
+
+def _has_text(path, cfg: dict) -> bool:
+    from . import ocr
+    try:
+        page, _ = ocr.recognize_file(path, cfg)
+    except Exception:                                             # noqa: BLE001 - OCR unavailable
+        return False
+    return sum(ch.isalnum() for ch in page.text()) >= 4
+
+
+def resolve_variants(paths: list, option: TargetOption, cfg: dict) -> list[TargetOption]:
+    """The variants of ``option`` that make sense once the files have been looked at.
+
+    One result means no question needs asking. Text recognition is only worth offering when
+    there is text to recognise."""
+    keep = list(option.variants)
+    if len(keep) < 2:
+        return keep or [option]
+    uses_ocr = [v for v in keep if any(e.backend.name == "ocr" for e in v.path)]
+    if uses_ocr and not any(_has_text(p, cfg) for p in paths[:5]):
+        keep = [v for v in keep if v not in uses_ocr]
+    return keep or [option]
 
 
 def _can_fill_forms(src: str) -> bool:

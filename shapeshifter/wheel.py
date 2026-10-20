@@ -125,6 +125,22 @@ class Worker(QThread):
         self.finished_all.emit(results, errors)
 
 
+class _VariantWorker(QThread):
+    """Looks inside the files to decide which ways of reaching a target are worth offering."""
+    done = Signal(list)
+
+    def __init__(self, paths: list[str], option: TargetOption, cfg: dict):
+        super().__init__()
+        self.paths, self.option, self.cfg = paths, option, cfg
+
+    def run(self):
+        try:
+            self.done.emit(engine.resolve_variants(self.paths, self.option, self.cfg))
+        except Exception:                                         # noqa: BLE001
+            log.exception("Looking at the files failed")
+            self.done.emit([self.option])
+
+
 class WheelView(QWidget):
     """Draws the wheel for ``self.paths``/``self.targets`` and tracks the hovered segment."""
 
@@ -151,6 +167,9 @@ class WheelView(QWidget):
         self.r_in, self.r_out = HUB_R + RING_GAP, ring_radius(0)
         self.rings: list[Ring] = []
         self.query = ""           # type-to-search text
+        self._variant_stack: list = []       # [(options before the question, the option asked about)]
+        self._variant_worker = None
+        self.analysing = False
         self._base_opacity = 1.0
         self.c = QPointF(0, 0)
         self.apply_cfg(cfg)
@@ -520,8 +539,10 @@ class WheelView(QWidget):
             self._center_text(p, box, sub, 10 * ls, dim, dy=24)
         elif self.state == "choose":
             if self.hub_hover or not self.targets:
-                self._center_text(p, box, "✕", 26 * ls, text, dy=-8)
-                self._center_text(p, box, "Cancel" if self.targets else "Close", 11 * ls, dim, dy=16)
+                back = bool(self._variant_stack)
+                self._center_text(p, box, "‹" if back else "✕", 26 * ls, text, dy=-8)
+                self._center_text(p, box, "Back" if back else ("Cancel" if self.targets else "Close"),
+                                  11 * ls, dim, dy=16)
             elif self.hover >= 0:
                 opt = self.options[self.hover]
                 top = {"rename": "rename to", "extract": "archive", "inspect": "show",
@@ -531,8 +552,11 @@ class WheelView(QWidget):
                 self._center_text(p, box, label, (24 if len(label) <= 5 else 17) * ls, text,
                                   bold=True, dy=6)
             else:
-                self._center_text(p, box, src_label, 22 * ls, text, bold=True, dy=-6)
-                if any(o.kind == "assume" for o in self.options):
+                head = self._variant_stack[-1][1].label if self._variant_stack else src_label
+                self._center_text(p, box, head, 22 * ls if len(head) <= 6 else 16 * ls, text, bold=True, dy=-6)
+                if self._variant_stack:
+                    sub = "choose how"
+                elif any(o.kind == "assume" for o in self.options):
                     sub = "which is it?"
                 elif len(self.paths) > 1:
                     sub = f"{len(self.paths)} files"
@@ -553,11 +577,18 @@ class WheelView(QWidget):
             pen.setCapStyle(Qt.PenCapStyle.RoundCap)
             p.setPen(pen)
             p.drawArc(arc_box, 90 * 16, -int(360 * 16 * max(0.02, self.progress)))
-            self._center_text(p, box, f"{int(self.progress * 100)}%", 20 * ls, text, bold=True, dy=-4)
+            if self.analysing:
+                self._center_text(p, box, "…", 26 * ls, text, bold=True, dy=-4)
+                self._center_text(p, box, "looking", 11 * ls, dim, dy=18)
+                return_early = True
+            else:
+                return_early = False
+                self._center_text(p, box, f"{int(self.progress * 100)}%", 20 * ls, text, bold=True, dy=-4)
             opt = self.option(self.chosen)
             sub = (f"{self.current_index + 1} / {len(self.paths)}" if len(self.paths) > 1
                    else opt.label if opt else (self.chosen or "").upper())
-            self._center_text(p, box, sub, 11 * ls, dim, dy=18)
+            if not return_early:
+                self._center_text(p, box, sub, 11 * ls, dim, dy=18)
         elif self.state == "done":
             pen = QPen(QColor("white"), 7)
             pen.setCapStyle(Qt.PenCapStyle.RoundCap)
@@ -600,7 +631,7 @@ class WheelView(QWidget):
             color = QColor(th.text)
         elif self.state == "busy":
             name = Path(self.paths[min(self.current_index, len(self.paths) - 1)]).name
-            text, color = f"Converting {name}", QColor(th.text_dim)
+            text, color = (f"Looking at {name}" if self.analysing else f"Converting {name}"), QColor(th.text_dim)
         else:
             text, color = self.message, self.message_color
         if not text:
@@ -776,6 +807,9 @@ class WheelOverlay(WheelView):
                 if idx >= 0 and not hub:
                     self._commit(self.targets[idx])
                     return
+                if hub and self._variant_stack:
+                    self._back()
+                    return
             self.dismiss()
         elif self.state in ("done", "error"):
             self.dismiss()
@@ -787,6 +821,8 @@ class WheelOverlay(WheelView):
                 self.worker.cancel_event.set()
             elif self.query:
                 self.set_query("")            # first Esc clears the search
+            elif self._variant_stack and self.state == "choose":
+                self._back()                  # Esc steps back out of a "how?" question
             else:
                 self.dismiss()
             return
@@ -836,8 +872,45 @@ class WheelOverlay(WheelView):
     def on_select(self, target: str):
         self._commit(target)
 
-    def _commit(self, target: str):
+    def _start_variants(self, opt: TargetOption):
+        """The target can be reached in different ways: look at the files, then ask only if needed."""
+        self.chosen = opt.key
+        self.analysing = True
+        self.state = "busy"
+        self.progress = 0.0
+        self._variant_worker = _VariantWorker(list(self.paths), opt, self.cfg)
+        self._variant_worker.done.connect(lambda variants, o=opt: self._variants_ready(o, variants))
+        self._variant_worker.start()
+        self.update()
+
+    def _variants_ready(self, opt: TargetOption, variants: list):
+        self._variant_worker = None
+        self.analysing = False
+        if self._closing:
+            return
+        self.state = "choose"
+        if len(variants) <= 1:
+            self._commit(variants[0].key if variants else opt.key, resolved=True)
+            return
+        self._variant_stack.append((list(self.options), opt))
+        self.query = ""
+        self.set_content(self.paths, variants)
+        self.replay_reveal()
+
+    def _back(self):
+        if not self._variant_stack:
+            return
+        options, _ = self._variant_stack.pop()
+        self.query = ""
+        self.set_content(self.paths, options)
+        self.replay_reveal()
+
+    def _commit(self, target: str, resolved: bool = False):
         if self.state != "choose":
+            return
+        opt = self.option(target)
+        if not resolved and opt is not None and opt.kind == "convert" and len(opt.variants) > 1:
+            self._start_variants(opt)
             return
         if target == "inspect":
             from .inspector import show_inspector

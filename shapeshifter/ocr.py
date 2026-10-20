@@ -334,8 +334,23 @@ def recognize(images: list[Path], cfg: dict | None = None, cancel=None,
     return pages
 
 
+_RECENT: dict = {}                                   # last few results, so looking twice is free
+
+
 def recognize_file(path, cfg: dict | None = None, cancel=None) -> tuple[Page, float]:
     """OCR one image file of any format; returns (page, scale) with scale = OCR size / file size."""
+    try:
+        st = Path(path).stat()
+        key = (str(Path(path).resolve()), st.st_mtime_ns, st.st_size, str((cfg or {}).get("ocr_language", "auto")))
+    except OSError:
+        key = None
+    if key is not None and key in _RECENT:
+        return _RECENT[key]
     with tempfile.TemporaryDirectory(prefix="ss-ocr-img-") as tmp:
         prepared, scale = prepare_image(path, Path(tmp) / "in.png")
-        return recognize([prepared], cfg, cancel)[0], scale
+        result = recognize([prepared], cfg, cancel)[0], scale
+    if key is not None:
+        _RECENT[key] = result
+        while len(_RECENT) > 4:
+            _RECENT.pop(next(iter(_RECENT)))
+    return result

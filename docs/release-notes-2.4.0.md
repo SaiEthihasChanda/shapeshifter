@@ -5,9 +5,9 @@ ShapeShifter finds the blanks, check boxes and signature lines; you type the ans
 (draw it or import a picture); it saves a filled copy next to the original, which is never changed. PDFs work page by page; real fillable PDF fields are filled natively and stay editable.
 
 **Also new**
-- **Word + picture** for images: puts the picture on a Word page so you can add text, then convert back to an image or PDF.
-- One pink **Inferred** group on the wheel for everything that comes from reading a file's contents: Fill form, OCR to
-  Word/text/Markdown/HTML, Word + picture and OCR PDF.
+- **Targets that ask how.** DOCX and PDF appear once on the wheel. For a picture, DOCX can be *Text (OCR)* or *Picture* (the picture on a Word page, for adding text and converting back), and PDF can be *Picture* or *Searchable*. ShapeShifter looks inside the file first and only asks when there is a real choice.
+- **OCR PDF** is only offered for PDFs that have scanned pages.
+- A pink **Inferred** group holds what only exists because the file was read: Fill form, and OCR to TXT/Markdown/HTML.
 - `shapeshifter fill` on the command line.
 
 **Download:** `ShapeShifter-Setup-2.4.0.exe` (Windows 10/11, 64-bit). Verify it against `SHA256SUMS.txt`.

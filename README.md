@@ -45,7 +45,8 @@ On the wheel:
   - **EXTRACT:** unpacks an archive into a folder.
   - **CSV? / YAML? – Treat as:** ShapeShifter isn't sure what the file is. Pick one, and the wheel shows that format's conversions.
   - **INSPECT:** shows what an unknown file contains.
-  - **Inferred group (pink):** options that come from *looking inside* the file rather than from changing its format: **FILL FORM**, text recognition (OCR) to Word/text/Markdown/HTML, **Word + picture**, and **OCR PDF**.
+  - **Inferred group (pink):** options that only exist because ShapeShifter looked *inside* the file: **FILL FORM**, and text recognition (OCR) to TXT, Markdown and HTML.
+  - **Targets that ask how:** a target such as **DOCX** or **PDF** is shown once, even when it can mean different things. For a picture, DOCX can be *Text (OCR)* or *Picture*, and PDF can be *Picture* or *Searchable*. Choosing it makes ShapeShifter look at the file first: if the picture has no text it just converts (a plain PDF or a Word page with the picture), and if it has text the wheel asks which way you want. The centre button (or Esc) goes back. A PDF only offers **OCR PDF** when it has scanned pages.
 
 ## Configured and inferred file types
 
@@ -141,8 +142,9 @@ Language & region).
 
 | From | To | Notes |
 |---|---|---|
-| Any image (JPG, PNG, TIFF, HEIC, WEBP, …) | **TXT, Markdown, HTML, DOCX** | Paragraphs are rebuilt from line positions: prose is re-flowed, short lines (forms, addresses) keep their breaks, and clearly larger lines become headings. |
-| Any image | **OCR PDF** | The image on a page with an invisible text layer: looks identical, but searchable and copyable. JPEGs are embedded untouched. |
+| Any image (JPG, PNG, TIFF, HEIC, WEBP, …) | **TXT, Markdown, HTML, DOCX (Text)** | Paragraphs are rebuilt from line positions: prose is re-flowed, short lines (forms, addresses) keep their breaks, and clearly larger lines become headings. |
+| Any image | **PDF (Searchable)** | The image on a page with an invisible text layer: looks identical, but searchable and copyable. JPEGs are embedded untouched. (Command line: `--to pdfocr`.) |
+| Any image | **DOCX (Picture)** | The picture on a Word page, no recognition: for adding text next to it, then converting back to an image or PDF. (Command line: `--to docxpic`.) |
 | Scanned PDF | **OCR PDF** | Adds the text layer to pages that have none. |
 | Scanned PDF | TXT, HTML, DOCX, Markdown | Pages without a text layer are recognised automatically. |
 

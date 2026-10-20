@@ -79,9 +79,14 @@ class TargetOption:
     on_wheel: bool = True
     warnings: list[str] = field(default_factory=list)
     learned: bool = False            # offered because of an earlier reverse conversion
+    variants: tuple = ()             # different ways to reach this one target; the wheel asks which
+    variant_label: str = ""          # when shown as one of those ways
+    variant_note: str = ""
 
     @property
     def label(self) -> str:
+        if self.variant_label:
+            return self.variant_label
         if self.kind == "rename":
             return "." + file_ext(self.fmt).upper()
         if self.kind == "assume":
@@ -104,6 +109,10 @@ class TargetOption:
             return "Unpack here"
         if self.kind == "inspect":
             return "What is it?"
+        if self.variants:
+            return "Asks how"
+        if self.variant_label:
+            return "Choose"
         if self.inferred:
             return "Inferred"
         if self.learned:
@@ -113,6 +122,8 @@ class TargetOption:
     @property
     def inferred(self) -> bool:
         """Comes from reading the file's contents (OCR, picture embedding, form filling)."""
+        if self.variants or self.variant_label:
+            return False
         return (self.kind == "fill" or (self.kind == "convert" and (
             self.fmt in PSEUDO_FORMATS or any(e.backend.name in INFERRING_BACKENDS for e in self.path))))
 
@@ -136,6 +147,10 @@ class TargetOption:
 
     @property
     def description(self) -> str:
+        if self.variant_note:
+            return self.variant_note
+        if self.variants:
+            return "Asks how: " + " or ".join(v.variant_label.lower() for v in self.variants)
         if self.kind == "rename":
             return f"Rename to .{file_ext(self.fmt)} — the contents are {name_of(self.fmt)}"
         if self.kind == "inspect":

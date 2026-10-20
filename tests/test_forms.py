@@ -150,12 +150,14 @@ class TestWheelOption:
         src = make_form(tmp_path / "form.png")
         opts = {o.key: o for o in engine.options_for(src)}
         assert "fill" in opts and opts["fill"].label == "FILL FORM"
-        for key in ("fill", "docxpic", "pdfocr", "docx", "txt", "md", "html"):
+        for key in ("fill", "txt", "md", "html"):                 # only reachable by reading the picture
             assert opts[key].category == "inferred", key
             assert opts[key].sublabel == "Inferred", key
-        assert opts["pdf"].category == "document" and opts["jpg"].category == "image"
+        # DOCX and PDF are ordinary targets that ask *how* (see test_variants.py)
+        assert opts["docx"].category == "document" and opts["pdf"].category == "document"
+        assert opts["jpg"].category == "image"
         keys = list(opts)
-        assert keys.index("fill") < keys.index("pdf")            # the inferred group comes before PDF
+        assert keys.index("fill") < keys.index("txt") < keys.index("pdf")
 
     def test_several_forms_can_be_filled_in_a_row(self, tmp_path):
         if not ocr.available():

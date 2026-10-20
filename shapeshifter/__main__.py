@@ -109,6 +109,8 @@ def cmd_targets(path: str) -> int:
     for o in opts:
         note = f"   ⚠ {'; '.join(o.warnings)}" if o.warnings else ""
         print(f"{o.key:14} {o.description if o.kind != 'convert' else o.via}{note}")
+        for v in o.variants:
+            print(f"{'':14}   - {v.variant_label}: {v.variant_note}  [--to {v.key}]")
     return 0
 
 
