@@ -164,12 +164,14 @@ def _draw_table(page, shape: Shape, rect) -> None:
 def deck_to_pdf(deck: Deck, dst: Path, progress=None, cancel=None) -> int:
     import pymupdf
     doc = pymupdf.open()
-    scratch = pymupdf.open().new_page(width=deck.width / EMU_PER_PT, height=deck.height / EMU_PER_PT)
+    scratch_doc = pymupdf.open()
     for i, slide in enumerate(deck.slides):
         if cancel is not None and cancel.is_set():
             from ..core import Cancelled
             raise Cancelled()
         page = doc.new_page(width=deck.width / EMU_PER_PT, height=deck.height / EMU_PER_PT)
+        # Text is measured on a throw-away page (a fresh one per slide: a shared one grows and slows everything down).
+        scratch = scratch_doc.new_page(width=deck.width / EMU_PER_PT, height=deck.height / EMU_PER_PT)
         if slide.bg_image:
             try:
                 page.insert_image(page.rect, stream=_image_bytes(slide.bg_image), keep_proportion=False)
@@ -182,6 +184,7 @@ def deck_to_pdf(deck: Deck, dst: Path, progress=None, cancel=None) -> int:
                 _draw_shape(page, shape, scratch)
             except Exception:                          # noqa: BLE001 - one odd shape shouldn't sink the slide
                 continue
+        scratch_doc.delete_page(-1)
         if progress:
             progress((i + 1) / max(1, len(deck.slides)))
     if not len(doc):

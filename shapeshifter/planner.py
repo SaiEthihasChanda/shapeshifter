@@ -44,6 +44,8 @@ WARNINGS = {
     "reflow": "Reflowed — the page layout is approximated",
     "table_layout": "Tables are found from the page layout; check the columns",
     "table_picture": "Table read from a picture by OCR; check the columns and numbers",
+    "raw_preview": "Uses the full-size JPEG preview stored in the RAW file, not the raw sensor data",
+    "legacy": "Old binary Office format: the text and values are recovered, not the formatting or pictures",
     "video_frame": "Saves a picture taken from the video",
     "slides_layout": "Slides are redrawn from their contents; fonts, effects and animations are simplified",
     "slides_outline": "Keeps the text, tables and pictures, not the slide layout",
@@ -197,7 +199,7 @@ ENGINE_NAMES = {"images": "Pillow", "mupdf": "PyMuPDF", "ffmpeg": "ffmpeg", "dat
                 "archives": "built-in", "pandoc": "pandoc", "libreoffice": "LibreOffice",
                 "native": "native", "custom": "custom format", "ocr": "Windows OCR",
                 "picturedoc": "built-in", "tables": "built-in tables", "slides": "built-in slides",
-                "docread": "built-in"}
+                "docread": "built-in", "raw": "built-in RAW preview", "sevenzip": "7-Zip"}
 
 
 def edge_flags(src: str, dst: str, backend: Backend) -> frozenset:
@@ -236,6 +238,10 @@ def edge_flags(src: str, dst: str, backend: Backend) -> frozenset:
             f.add("table_layout")
         elif sc == "image":
             f.add("table_picture")
+    if backend.name == "raw":
+        f.add("raw_preview")
+    if src in ("doc", "xls", "ppt") and backend.name in ("docread", "slides", "data", "tables"):
+        f.add("legacy")
     if backend.name == "ffmpeg" and sc == "video" and dst in ("png", "jpg", "webp"):
         f.add("video_frame")
     if backend.name == "slides":

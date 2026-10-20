@@ -107,6 +107,9 @@ def _expand_ligatures(doc) -> int:
     return changed
 
 
+MAX_LAYOUT_PAGES = 3000
+
+
 def html_to_pdf(html: str, dst: Path, resource_dirs, title: str = "") -> int:
     """Lay HTML out on A4 pages with MuPDF's Story engine. Returns the page count."""
     import pymupdf
@@ -120,7 +123,23 @@ def html_to_pdf(html: str, dst: Path, resource_dirs, title: str = "") -> int:
     story = pymupdf.Story(html=html, user_css=PAGE_CSS, archive=archive)
     media = pymupdf.paper_rect("a4")
     where = media + (56, 56, -56, -56)
-    doc = story.write_with_links(lambda num, filled: (media, where, pymupdf.Identity))
+    stalled = [0]
+
+    def page(num, filled):
+        # If a page takes nothing (a picture or table row too big to place), the layout would repeat
+        # forever and eat memory: stop with a clear message instead.
+        height = (filled[3] - filled[1]) if filled else 0.0
+        if num > 0 and height < 1:
+            stalled[0] += 1
+            if stalled[0] >= 3:
+                raise ConversionError("Part of this document can't be laid out on a page "
+                                      "(a table row or picture is too large).")
+        else:
+            stalled[0] = 0
+        if num > MAX_LAYOUT_PAGES:
+            raise ConversionError(f"The document is too long to lay out (over {MAX_LAYOUT_PAGES} pages).")
+        return media, where, pymupdf.Identity
+    doc = story.write_with_links(page)
     try:
         _expand_ligatures(doc)
         doc.set_metadata({"title": title, "producer": "ShapeShifter"})

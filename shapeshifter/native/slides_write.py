@@ -501,6 +501,8 @@ def write_odp(deck: Deck, path) -> None:
                 continue
             kind = "L2" if p.bullet == "#" else "L1"
             depth = p.level + 1
+            if len(stack) >= depth and stack[depth - 1] != kind:
+                close_to(depth - 1)
             if len(stack) >= depth:
                 close_to(depth)
                 out.append("</text:list-item><text:list-item>")

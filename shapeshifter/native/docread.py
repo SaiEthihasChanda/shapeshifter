@@ -154,7 +154,18 @@ def docx_blocks(path) -> tuple[list[docs.Block], str]:
                 level = min(6, int(m.group(1)))
             elif style in ("title", "subtitle") or style_id.lower() == "title":
                 level = 1 if style != "subtitle" else 2
-            if text:
+            manual = None
+            if text and not level and num is None:
+                # "• item" / "1. item" typed as text (how many generators write lists): recognise it
+                ind = ppr.find(W + "ind") if ppr is not None else None
+                left = int(ind.get(W + "left", "0") or 0) if ind is not None else 0
+                mb = re.match(r"^[•·▪◦‣\-–*]\s{1,8}(?=\S)", text)
+                mn = re.match(r"^\d{1,3}\\?[.)]\s{1,8}(?=\S)", text)
+                if mb or mn:
+                    manual = ("oli" if mn else "li", text[(mb or mn).end():], max(0, min(5, round((left - 720) / 360))) if left else 0)
+            if manual is not None:
+                blocks.append(docs.Block(manual[0], manual[1], level=manual[2]))
+            elif text:
                 if level:
                     plain = docs.plain(text)
                     title = title or plain
@@ -215,13 +226,32 @@ def odt_blocks(path) -> tuple[list[docs.Block], str]:
         root = ET.fromstring(z.read("content.xml"))
         names = set(z.namelist())
         bold_styles, italic_styles, numbered_lists = set(), set(), set()
-        for st in root.iter(_o("style:style")):
-            tp = st.find(_o("style:text-properties"))
-            if tp is not None:
-                if tp.get(_o("fo:font-weight")) == "bold":
-                    bold_styles.add(st.get(_o("style:name")))
-                if tp.get(_o("fo:font-style")) == "italic":
-                    italic_styles.add(st.get(_o("style:name")))
+        # Styles come from content.xml and styles.xml (generators like pandoc keep "Strong" in the latter),
+        # and a style may take its look from a parent style.
+        defs: dict[str, tuple[str, bool, bool]] = {}
+        sources = [root]
+        if "styles.xml" in names:
+            sources.append(ET.fromstring(z.read("styles.xml")))
+        for src_root in sources:
+            for st in src_root.iter(_o("style:style")):
+                tp = st.find(_o("style:text-properties"))
+                defs[st.get(_o("style:name"))] = (
+                    st.get(_o("style:parent-style-name"), ""),
+                    tp is not None and tp.get(_o("fo:font-weight")) == "bold",
+                    tp is not None and tp.get(_o("fo:font-style")) == "italic")
+
+        def resolve(name: str, depth: int = 0) -> tuple[bool, bool]:
+            parent, bold, italic = defs.get(name, ("", False, False))
+            if depth < 6 and parent and not (bold and italic):
+                pb, pi = resolve(parent, depth + 1)
+                return bold or pb, italic or pi
+            return bold, italic
+        for name in defs:
+            b, i = resolve(name)
+            if b:
+                bold_styles.add(name)
+            if i:
+                italic_styles.add(name)
         for ls in root.iter(_o("text:list-style")):
             first = ls[0] if len(ls) else None
             if first is not None and first.tag.endswith("number"):

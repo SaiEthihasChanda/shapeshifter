@@ -14,7 +14,7 @@ from ..core import Backend, Context, ConversionError, target_ext
 
 log = logging.getLogger(__name__)
 
-DECK_SOURCES = {"pptx", "odp", "ppsx", "potx"}
+DECK_SOURCES = {"pptx", "odp", "ppsx", "potx", "ppt"}           # ppt: old binary format, text only
 DECK_OUTLINES = {"pdf", "html", "md", "txt", "docx"}
 DECK_FORMATS = {"pptx", "odp"}
 TEXT_SOURCES = {"md", "html", "txt", "docx", "odt"}
@@ -45,6 +45,8 @@ class SlidesBackend(Backend):
         return set()
 
     def cost(self, src, dst):
+        if src == "ppt":
+            return 6.8                          # LibreOffice does this better and wins when it is installed
         if src == "pdf":
             return 4.5                          # every page becomes a picture
         if src in _picture_sources():
@@ -76,6 +78,9 @@ class SlidesBackend(Backend):
         try:
             if s in ("pptx", "ppsx", "potx"):
                 return slides.read_pptx(src)
+            if s == "ppt":
+                from ..native import legacy
+                return slides_write.deck_from_blocks(legacy.ppt_blocks(src.read_bytes()), src.stem)
             if s == "odp":
                 return slides_write.read_odp(src)
             if s == "pdf":
@@ -142,22 +147,33 @@ def _picture_bytes(path: Path) -> bytes:
 
 
 class DocReadBackend(Backend):
-    """Word and OpenDocument text -> Markdown / HTML / text / PDF without pandoc or LibreOffice."""
+    """Word, OpenDocument text and RTF <-> Markdown / HTML / text / PDF, and between each other,
+    without pandoc or LibreOffice (pandoc, when installed, handles more of Word and wins on cost)."""
 
     name = "docread"
-    base_cost = 3.4                              # pandoc (3.0) wins when installed; this is the fallback
+    base_cost = 3.4
 
     def available(self):
         return True
 
     def sources(self):
-        return {"docx", "odt"}
+        return {"doc", "docx", "odt", "rtf", "md", "html", "txt"}
 
     def targets(self, src):
-        return set(READ_TARGETS)
+        if src == "doc":
+            return {"md", "html", "txt", "pdf", "docx", "odt", "rtf"}
+        if src == "docx":
+            return {"md", "html", "txt", "pdf", "odt", "rtf"}
+        if src == "odt":
+            return {"md", "html", "txt", "pdf", "docx", "rtf"}
+        if src == "rtf":
+            return {"md", "html", "txt", "pdf", "docx", "odt"}
+        return {"odt", "rtf"}                          # Markdown / HTML / text have other ways to Word already
 
     def cost(self, src, dst):
         # Only a fallback: pandoc understands more of Word (and wins whenever it is installed).
+        if src == "doc":
+            return 6.8                                  # old binary Word: LibreOffice does it better when installed
         return 6.5 if dst == "pdf" else 3.4
 
     def convert(self, src: Path, dst: Path, ctx: Context) -> list[Path]:
@@ -165,18 +181,42 @@ class DocReadBackend(Backend):
         s = ctx.src_fmt or target_ext(src)
         t = ctx.dst_fmt or target_ext(dst)
         try:
-            blocks, title = docread.docx_blocks(src) if s == "docx" else docread.odt_blocks(src)
+            if s == "doc":
+                from ..native import legacy
+                blocks, title = legacy.doc_blocks(src.read_bytes()), ""
+            elif s == "docx":
+                blocks, title = docread.docx_blocks(src)
+            elif s == "odt":
+                blocks, title = docread.odt_blocks(src)
+            elif s == "rtf":
+                from ..native import rtf
+                blocks, title = rtf.rtf_blocks(src.read_bytes()), ""
+            else:
+                text = src.read_bytes().decode("utf-8-sig", errors="replace")
+                blocks = docs.parse_markdown(text) if s == "md" else docs.parse_html(text) if s == "html" else docs.parse_text(text)
+                title = docs.html_title(text) if s == "html" else ""
         except Exception as e:                               # noqa: BLE001
             raise ConversionError(f"Couldn't read the {s.upper()} file: {e}") from e
+        title = title or next((docs.plain(b.text) for b in blocks if b.kind == "h1"), "") or src.stem
         ctx.progress(0.5)
+        base = [src.parent]
         if t == "md":
             dst.write_text(docs.to_markdown([b for b in blocks if b.kind != "img"]), encoding="utf-8")
         elif t == "txt":
             dst.write_text(docs.to_text([b for b in blocks if b.kind != "img"]), encoding="utf-8")
         elif t == "html":
-            dst.write_text(docs.to_html(blocks, title or src.stem), encoding="utf-8")
+            dst.write_text(docs.to_html(blocks, title), encoding="utf-8")
         elif t == "pdf":
             from .mupdf import html_to_pdf
-            html_to_pdf(docs.to_html(blocks, title or src.stem, css=False), dst, [src.parent], title or src.stem)
+            html_to_pdf(docs.to_html(blocks, title, css=False), dst, base, title)
+        elif t == "docx":
+            from ..native.docx import blocks_to_docx
+            dst.write_bytes(blocks_to_docx(blocks, base, title))
+        elif t == "odt":
+            from ..native.odtwrite import blocks_to_odt
+            dst.write_bytes(blocks_to_odt(blocks, base, title))
+        elif t == "rtf":
+            from ..native.rtf import write_rtf
+            dst.write_bytes(write_rtf(blocks, base, title))
         ctx.progress(1.0)
         return [dst]

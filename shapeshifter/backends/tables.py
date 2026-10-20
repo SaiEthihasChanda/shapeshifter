@@ -16,7 +16,7 @@ log = logging.getLogger(__name__)
 
 DECKS = {"pptx", "odp", "ppsx", "potx"}
 DOC_SOURCES = {"pdf", "docx", "odt", "html", "md"} | DECKS
-DATA_SOURCES = {"csv", "tsv", "xlsx", "ods"}
+DATA_SOURCES = {"csv", "tsv", "xlsx", "xlsm", "xls", "ods"}
 DATA_TARGETS = {"csv", "tsv", "xlsx", "json", "ods"}
 DOC_TARGETS = {"html", "md", "docx", "pdf"}
 SINGLE_FILE_DATA = {"xlsx", "ods", "json"}          # hold every table; CSV/TSV need one file each
@@ -31,6 +31,26 @@ def _image_sources() -> set[str]:
 def _ocr_ok() -> bool:
     from .. import ocr
     return ocr.available()
+
+
+def _table_page_html(tables, title: str) -> str:
+    """HTML for printing tables: type size follows the number of columns, and long unbroken strings
+    may wrap (otherwise a wide table can be too wide for any page)."""
+    import re
+
+    from ..native import docs
+    from ..native import tables as T
+    widest = max((t.width for t in tables), default=1)
+    size = 10.5 if widest <= 5 else max(6.0, 10.5 - 0.45 * (widest - 5))
+
+    def breakable(block):
+        if block.kind == "table":
+            block.rows = [[re.sub(r"(\S{18})(?=\S)", "\\1\u200b", str(c)) for c in r] for r in block.rows]
+        return block
+    blocks = [breakable(b) for b in T.to_blocks(tables)]
+    html = docs.to_html(blocks, title, css=False)
+    style = f"<style>td,th{{font-size:{size:.1f}pt;padding:2px 4px}}</style>"
+    return html.replace("</head>", style + "</head>", 1)
 
 
 class TableBackend(Backend):
@@ -158,7 +178,7 @@ class TableBackend(Backend):
         elif t == "pdf":
             from ..native import docs
             from .mupdf import html_to_pdf
-            html_to_pdf(docs.to_html(T.to_blocks(tables), title, css=False), dst, [dst.parent], title)
+            html_to_pdf(_table_page_html(tables, title), dst, [dst.parent], title)
         else:
             raise ConversionError(f"Can't write tables as {t}")
         return [dst]

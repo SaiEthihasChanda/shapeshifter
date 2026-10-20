@@ -12,8 +12,8 @@ MAX_PIXELS = 250_000_000 // 2
 
 READ = {"jpg", "png", "webp", "avif", "heic", "gif", "bmp", "tiff", "ico", "tga", "qoi",
         "jp2", "pcx", "ppm", "psd", "dds", "icns",
-        # configured kinds Pillow can also open
-        "apng", "cur", "dib", "xbm", "xpm", "sgi", "fits", "wmf", "emf", "dng", "avifs", "heics"}
+        # configured kinds Pillow can also open ("dng" is left to the RAW reader: Pillow would only see its thumbnail)
+        "apng", "cur", "dib", "xbm", "xpm", "sgi", "fits", "wmf", "emf", "avifs", "heics"}
 WRITE = {"jpg", "png", "webp", "avif", "heic", "gif", "bmp", "tiff", "ico", "tga", "qoi", "pdf"}
 
 PIL_FORMAT = {

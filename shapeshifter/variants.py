@@ -90,6 +90,9 @@ class Facts:
         if f in ("xlsx", "xlsm"):
             with zipfile.ZipFile(self.path) as z:
                 return len(re.findall(rb"<sheet\b", z.read("xl/workbook.xml")))
+        if f == "xls":
+            from .native import legacy
+            return len([n for n, rows in legacy.read_xls(self.path.read_bytes()).items()])
         if f == "ods":
             with zipfile.ZipFile(self.path) as z:
                 return len(re.findall(rb"<table:table\b", z.read("content.xml")))
@@ -110,7 +113,13 @@ class Facts:
             import pymupdf
             with pymupdf.open(str(self.path)) as doc:
                 return doc.page_count
-        if f in DECK_SRC and f != "ppt":
+        if f == "ppt":
+            from .native import legacy
+            return len(legacy.read_ppt(self.path.read_bytes()))
+        if f == "doc":
+            from .native import legacy
+            return max(1, round(len(legacy.doc_text(self.path.read_bytes())) / CHARS_PER_PAGE + 0.49))
+        if f in DECK_SRC:
             with zipfile.ZipFile(self.path) as z:
                 names = z.namelist()
                 if f == "odp":

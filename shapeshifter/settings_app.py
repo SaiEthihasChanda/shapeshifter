@@ -1236,8 +1236,20 @@ ENGINE_INFO = {
                "Gyan.FFmpeg", "https://ffmpeg.org"),
     "pandoc": ("pandoc", "Markdown, HTML, DOCX, ODT, RST, EPUB, LaTeX",
                "JohnMacFarlane.Pandoc", "https://pandoc.org"),
-    "libreoffice": ("LibreOffice", "Word, Excel and PowerPoint files ↔ PDF / OpenDocument",
+    "libreoffice": ("LibreOffice", "Word, Excel and PowerPoint files ↔ PDF / OpenDocument; gives the best "
+                    "results for old .doc / .xls / .ppt files",
                     "TheDocumentFoundation.LibreOffice", "https://www.libreoffice.org"),
+    "sevenzip": ("7-Zip", "RAR / CBR, ISO, CAB, WIM, DMG, VHD(X), VMDK, QCOW2, SquashFS, RPM, CPIO, XAR and CHM archives: "
+                 "extract them or re-pack as ZIP / 7z / TAR", "7zip.7zip", "https://www.7-zip.org"),
+    "tables": ("Built-in table reader", "Finds tables in PDFs, Word and OpenDocument files, web pages, Markdown, slides and "
+               "pictures (with Windows OCR) and writes them as spreadsheets, CSV, JSON or documents", None, None),
+    "slides": ("Built-in presentations", "PowerPoint (PPTX, and old PPT text) and OpenDocument (ODP) presentations: read, draw "
+               "to PDF, turn into outlines, and write PPTX / ODP from PDFs, pictures and documents", None, None),
+    "docread": ("Built-in Word / OpenDocument / RTF", "Reads and writes DOCX, ODT and RTF (and reads old .doc) without "
+                "pandoc or LibreOffice; pandoc is used instead when installed", None, None),
+    "picturedoc": ("Picture in Word", "Puts a picture on a Word page", None, None),
+    "raw": ("Camera RAW previews", "CR2, NEF, ARW, DNG, ORF, RW2, RAF: takes the full-size JPEG the camera stored in the file",
+            None, None),
 }
 
 
@@ -1268,7 +1280,8 @@ class EnginesPage(Page):
         from .backends.external import pandoc_path, soffice_path
         from .backends.media import ffmpeg_path
         from .identify import magika_available
-        paths = {"ffmpeg": ffmpeg_path, "pandoc": pandoc_path, "libreoffice": soffice_path}
+        from .backends.sevenzip import sevenzip_path
+        paths = {"ffmpeg": ffmpeg_path, "pandoc": pandoc_path, "libreoffice": soffice_path, "sevenzip": sevenzip_path}
         entries = []
         for backend in ALL_BACKENDS:
             try:

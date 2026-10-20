@@ -14,7 +14,7 @@ from pathlib import Path
 
 from .base import Backend, Context, ConversionError, target_ext
 
-TABLE = {"csv", "tsv", "xlsx", "sqlite"}
+TABLE = {"csv", "tsv", "xlsx", "xlsm", "xls", "sqlite"}      # xls: old binary Excel, read-only
 TREE = {"json", "yaml", "toml", "xml", "ini"}
 WRITABLE = {"csv", "tsv", "json", "yaml", "xlsx", "toml", "xml"}
 
@@ -106,10 +106,16 @@ def _read_table(path: Path, ext: str) -> dict[str, list[list]]:
             return sheets
         finally:
             con.close()
-    if ext == "xlsx" and _native_xlsx:
+    if ext == "xls":
+        from ..native import legacy
+        try:
+            return {k: v for k, v in legacy.read_xls(path.read_bytes()).items()}
+        except legacy.LegacyError as e:
+            raise ConversionError(str(e)) from e
+    if ext in ("xlsx", "xlsm") and _native_xlsx:
         from ..native import xlsx
         return xlsx.read(path)
-    if ext == "xlsx":
+    if ext in ("xlsx", "xlsm"):
         import openpyxl
         wb = openpyxl.load_workbook(path, read_only=True, data_only=True)
         try:
