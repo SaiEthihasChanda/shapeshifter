@@ -297,6 +297,8 @@ class WheelView(QWidget):
             return ["fill", "form", "write", "type", "sign", "signature", "checkbox", "inferred"]
         if opt.kind == "combine":
             return ["combine", "merge", "join", "one", "all", *search_terms(opt.fmt)]
+        if opt.kind == "action":
+            return [*opt.terms, opt.title.lower(), "same"]
         return search_terms(opt.fmt) if opt.fmt else []
 
     def matches(self) -> list[int]:
@@ -561,7 +563,7 @@ class WheelView(QWidget):
             elif self.hover >= 0:
                 opt = self.options[self.hover]
                 top = {"rename": "rename to", "extract": "archive", "inspect": "show",
-                       "assume": "treat as", "fill": "inferred", "combine": "combine all"}.get(opt.kind, f"{src_label}  →")
+                       "assume": "treat as", "fill": "inferred", "combine": "combine all", "action": "same format"}.get(opt.kind, f"{src_label}  →")
                 label = opt.label
                 self._center_text(p, box, top, 11 * ls, dim, dy=-18)
                 self._center_text(p, box, label, (24 if len(label) <= 5 else 17) * ls, text,
@@ -924,7 +926,7 @@ class WheelOverlay(WheelView):
         if self.state != "choose":
             return
         opt = self.option(target)
-        if not resolved and opt is not None and opt.kind == "convert" and len(opt.variants) > 1:
+        if not resolved and opt is not None and opt.kind in ("convert", "action") and len(opt.variants) > 1:
             self._start_variants(opt)
             return
         if target == "inspect":

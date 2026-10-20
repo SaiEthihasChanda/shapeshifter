@@ -83,6 +83,8 @@ def options_for(path: str | Path, include_hidden_engine_targets: bool = False,
         opts += _learned_options(src, {o.key for o in opts})
         if _can_fill_forms(src):
             opts.append(TargetOption(key="fill", kind="fill"))
+        from . import actions
+        opts += actions.options_for(Path(path), src)
         opts = _filter_by_content(path, src, _apply_specs(path, src, _group_variants(path, src, opts)))
     if ident.details.get("sensitive"):
         # Private keys & keystores: only re-encodings of the same secret, never documents.
@@ -389,6 +391,9 @@ def convert_inplace(path: str | Path, target: str, ctx: Context,
 
     if not ident.fmt:
         raise ConversionError("Couldn't work out what kind of file this is.")
+    if target.startswith("act:"):                       # smaller / resize / rotate / split…: same kind of file
+        from . import actions
+        return actions.run_inplace(src, target, ident.fmt, ctx)
     from . import variants
     target, variant = variants.split_target(target)
     target = target if target == "extract" else canonical(target)

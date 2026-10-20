@@ -89,11 +89,15 @@ class TargetOption:
     variant_label: str = ""          # when shown as one of those ways
     variant_note: str = ""
     applies: str = ""               # fact about the file that makes this way worth offering (variants.check)
+    title: str = ""                 # wheel label of an action (same-format task)
+    terms: tuple = ()               # words that find it when typing to search
 
     @property
     def label(self) -> str:
         if self.variant_label:
             return self.variant_label
+        if self.title:
+            return self.title
         if self.kind == "rename":
             return "." + file_ext(self.fmt).upper()
         if self.kind == "assume":
@@ -120,6 +124,8 @@ class TargetOption:
             return "What is it?"
         if self.kind == "combine":
             return "Combine"
+        if self.kind == "action":
+            return "Choose" if self.variant_label else ("Asks how" if self.variants else "Same format")
         if self.variants:
             return "Asks how"
         if self.variant_label:
@@ -142,7 +148,7 @@ class TargetOption:
 
     @property
     def category(self) -> str:
-        if self.kind in ("rename", "inspect"):
+        if self.kind in ("rename", "inspect", "action"):
             return "tool"
         if self.kind == "extract":
             return "archive"
@@ -390,7 +396,7 @@ def ordered(options: list[TargetOption], src_fmt: str | None) -> list[TargetOpti
                                                 "subtitle", "model", "font", "security", "archive")
                                     if c != src_cat]
     order = {c: i for i, c in enumerate(cats)}
-    kind_order = {"assume": 0, "rename": 0, "combine": 0, "convert": 1, "fill": 1, "extract": 2, "inspect": 3}
+    kind_order = {"assume": 0, "rename": 0, "combine": 0, "convert": 1, "fill": 1, "extract": 2, "action": 2, "inspect": 3}
 
     def key(o: TargetOption):
         if o.kind == "assume":

@@ -57,6 +57,33 @@ class Facts:
         with Image.open(self.path) as im:
             return int(getattr(im, "n_frames", 1))
 
+    def _side(self) -> int:
+        from PIL import Image
+        try:
+            import pillow_heif
+            pillow_heif.register_heif_opener()
+        except Exception:                                         # noqa: BLE001
+            pass
+        with Image.open(self.path) as im:
+            return max(im.size)
+
+    def _exif(self) -> int:
+        from PIL import Image
+        try:
+            import pillow_heif
+            pillow_heif.register_heif_opener()
+        except Exception:                                         # noqa: BLE001
+            pass
+        with Image.open(self.path) as im:
+            ex = im.getexif()
+            gps = bool(ex.get_ifd(0x8825)) if hasattr(ex, "get_ifd") else False
+            return 1 if (len(ex) > 1 or gps or im.info.get("xmp") or im.info.get("exif") and len(ex) > 0) else 0
+
+    def _images(self) -> int:
+        import pymupdf
+        with pymupdf.open(str(self.path)) as doc:
+            return sum(len(doc[i].get_images()) for i in range(min(doc.page_count, 20)))
+
     # -- spreadsheets / databases
     def _sheets(self) -> int:
         f = self.fmt
@@ -135,7 +162,8 @@ class Facts:
         return self.path.stat().st_size
 
 
-_DEFAULTS = {"frames": 1, "sheets": 1, "pages": 1, "audio": 1, "video": 1, "subs": 0, "duration": 0.0, "size": 0}
+_DEFAULTS = {"frames": 1, "sheets": 1, "pages": 1, "audio": 1, "video": 1, "subs": 0, "duration": 0.0, "size": 0,
+             "side": 0, "exif": 0, "images": 0}
 
 
 @lru_cache(maxsize=32)
@@ -152,7 +180,7 @@ def facts_for(path, fmt: str) -> Facts:
         return Facts(p, fmt)
 
 
-_TAG = re.compile(r"^(frames|sheets|pages|duration|size)>(\d+(?:\.\d+)?)$")
+_TAG = re.compile(r"^(frames|sheets|pages|duration|size|side|images)>(\d+(?:\.\d+)?)$")
 
 
 def check(tag: str, path, fmt: str) -> bool:

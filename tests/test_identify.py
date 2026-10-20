@@ -204,3 +204,9 @@ def test_inspector_report(tmp_path):
     p.write_bytes(png_bytes())
     rep = report(str(p))
     assert rep["format"] == "png" and rep["mismatch"] and "webp" in rep["conversions"]
+
+
+def test_utf16_text_is_not_mistaken_for_an_mp3(tmp_path):
+    p = tmp_path / "u.csv"
+    p.write_bytes("a,b\r\n1,2\r\n".encode("utf-16"))
+    assert identify(p).fmt in ("csv", "txt")

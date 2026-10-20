@@ -145,7 +145,8 @@ def _probe_signatures(head: bytes, ext_fmt: str, size: int = 0) -> list[Candidat
             kind = certs.der_kind(head if size <= len(head) else b"")
             out.append(Candidate("der", 0.9, f"ASN.1 DER structure{f' ({kind})' if kind else ''}"))
     # MP3 without ID3 / AAC ADTS: frame sync
-    if len(head) > 2 and head[0] == 0xFF and (head[1] & 0xE0) == 0xE0:
+    if (len(head) > 2 and head[0] == 0xFF and (head[1] & 0xE0) == 0xE0
+            and not (head[1] == 0xFE and _decode_text(head))):          # FF FE is also a UTF-16 text marker
         if (head[1] & 0x06) == 0:
             out.append(Candidate("aac", 0.7, "starts with an AAC (ADTS) frame header"))
         elif not _sig(head, 0, b"\xff\xd8"):
