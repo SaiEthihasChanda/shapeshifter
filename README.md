@@ -45,6 +45,7 @@ On the wheel:
   - **EXTRACT:** unpacks an archive into a folder.
   - **CSV? / YAML? – Treat as:** ShapeShifter isn't sure what the file is. Pick one, and the wheel shows that format's conversions.
   - **INSPECT:** shows what an unknown file contains.
+  - **Inferred group (pink):** options that come from *looking inside* the file rather than from changing its format: **FILL FORM**, text recognition (OCR) to Word/text/Markdown/HTML, **Word + picture**, and **OCR PDF**.
 
 ## Configured and inferred file types
 
@@ -152,6 +153,22 @@ recognised text can contain mistakes, so those wheel options carry an amber **!*
 
 Typical workflow: *scan → DOCX (fill it in) → image or PDF*. The typed text ends up in the image as
 pixels, not as selectable text; follow it with *OCR PDF* if you want it searchable.
+
+## Filling in a form that is only a picture
+
+Pick **FILL FORM** on the wheel for a photo or scan of a form. ShapeShifter finds the blanks next to labels
+(a line or free space), square check boxes and signature lines, and opens a window with the form on the left
+as a live preview and the fields on the right.
+
+- Type the answers, tick boxes, and add a signature: **Draw…** it with the mouse or **Choose image…** (a scan or photo of
+  your signature; the white background is removed). It remembers your signature for next time.
+- Missed a field? Press **+ Text**, **+ Check box** or **+ Signature**, then click where it goes on the form.
+- Pick the writing style (typed, handwriting, typewriter), ink colour and size. **Save filled image** writes
+  `form (filled).png` next to the original, which is never changed.
+- From the command line: `shapeshifter fill form.png --list`, or `shapeshifter fill form.png --set "Full name=Ada" --tick Student --sign sig.png`.
+
+Detection uses Windows OCR plus a look at the pixels, so very skewed, low-contrast or handwritten forms may need
+fields added by hand. One form at a time; scanned PDFs aren't supported yet (convert the page to an image first).
 
 ## Risky files are refused
 

@@ -48,8 +48,10 @@ CATEGORIES = {
 }
 
 CATEGORY_OF = {ext: cat for cat, exts in CATEGORIES.items() for ext in exts}
-CATEGORY_OF["pdfocr"] = "document"
-CATEGORY_OF["docxpic"] = "document"
+# Options that come from looking *inside* the file (OCR, embedding a picture, filling a form)
+# rather than from a plain format change share one "inferred" group on the wheel.
+CATEGORY_OF["pdfocr"] = "inferred"
+CATEGORY_OF["docxpic"] = "inferred"
 
 NAMES = {
     "jpg": "JPEG image", "png": "PNG image", "webp": "WebP image", "avif": "AVIF image",
@@ -103,6 +105,7 @@ CATEGORY_COLORS = {
     "data": "#46c06b",
     "archive": "#d4a72c",
     "tool": "#8a8f9c",
+    "inferred": "#ff6fb5",
     "code": "#e0607e",
     "subtitle": "#c9a227",
     "security": "#d9534f",

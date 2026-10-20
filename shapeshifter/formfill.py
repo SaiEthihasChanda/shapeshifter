@@ -1,0 +1,470 @@
+"""The "Fill form" window: shows the picture of a form, the fields found in it, and lets the
+person type answers, tick boxes and add a signature. The picture on the left is a live preview
+of exactly what will be written to the new image.
+"""
+
+from __future__ import annotations
+
+import logging
+import os
+import shutil
+from pathlib import Path
+
+from PySide6.QtCore import QPointF, QRectF, Qt, QThread, QTimer, Signal
+from PySide6.QtGui import QColor, QImage, QPainter, QPen, QPixmap
+from PySide6.QtWidgets import (QApplication, QCheckBox, QComboBox, QDialog, QFileDialog, QFrame,
+                               QHBoxLayout, QLabel, QLineEdit, QMessageBox, QPushButton,
+                               QScrollArea, QSlider, QVBoxLayout, QWidget)
+
+from . import config, forms
+from .core import ConversionError
+
+log = logging.getLogger(__name__)
+
+_open: list[QDialog] = []
+PREVIEW_SIDE = 1500
+KIND_COLORS = {"text": "#4a8fff", "checkbox": "#46c06b", "signature": "#f08a3c"}
+SIGNATURE_FILE = config.DATA_DIR / "signature.png"
+
+
+def show_form_filler(path: str, cfg: dict | None = None) -> None:
+    dlg = FormFiller(path, cfg or config.load())
+    _open.append(dlg)
+    dlg.finished.connect(lambda _: _open.remove(dlg) if dlg in _open else None)
+    dlg.show()
+    dlg.raise_()
+    dlg.activateWindow()
+
+
+class _Detect(QThread):
+    done = Signal(list, tuple)
+    failed = Signal(str)
+
+    def __init__(self, path: str, cfg: dict):
+        super().__init__()
+        self.path, self.cfg = path, cfg
+
+    def run(self):
+        try:
+            fields, size = forms.detect(self.path, self.cfg)
+            self.done.emit(fields, size)
+        except ConversionError as e:
+            self.failed.emit(str(e))
+        except Exception as e:                      # noqa: BLE001 - shown to the user
+            log.exception("Form detection crashed")
+            self.failed.emit(f"Couldn't read this form: {e}")
+
+
+# ---------------------------------------------------------------- signature pad
+
+class SignaturePad(QDialog):
+    """Draw a signature with the mouse (or a pen or finger)."""
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setWindowTitle("Draw your signature")
+        self.canvas = QImage(640, 220, QImage.Format.Format_RGB32)
+        self.canvas.fill(Qt.GlobalColor.white)
+        self._last: QPointF | None = None
+        self._strokes = 0
+        lay = QVBoxLayout(self)
+        lay.addWidget(QLabel("Sign inside the box:"))
+        self.area = QLabel()
+        self.area.setFixedSize(640, 220)
+        self.area.setFrameShape(QFrame.Shape.Box)
+        self.area.setCursor(Qt.CursorShape.CrossCursor)
+        self.area.mousePressEvent = self._press
+        self.area.mouseMoveEvent = self._move
+        self.area.mouseReleaseEvent = lambda e: setattr(self, "_last", None)
+        lay.addWidget(self.area)
+        row = QHBoxLayout()
+        clear = QPushButton("Clear")
+        clear.clicked.connect(self._clear)
+        ok = QPushButton("Use this signature")
+        ok.setDefault(True)
+        ok.clicked.connect(self._accept)
+        cancel = QPushButton("Cancel")
+        cancel.clicked.connect(self.reject)
+        row.addWidget(clear)
+        row.addStretch(1)
+        row.addWidget(cancel)
+        row.addWidget(ok)
+        lay.addLayout(row)
+        self._refresh()
+
+    def _refresh(self):
+        self.area.setPixmap(QPixmap.fromImage(self.canvas))
+
+    def _clear(self):
+        self.canvas.fill(Qt.GlobalColor.white)
+        self._strokes = 0
+        self._refresh()
+
+    def _press(self, e):
+        self._last = e.position()
+        self._strokes += 1
+        self._line(self._last, self._last)
+
+    def _move(self, e):
+        if self._last is not None:
+            self._line(self._last, e.position())
+            self._last = e.position()
+
+    def _line(self, a: QPointF, b: QPointF):
+        p = QPainter(self.canvas)
+        p.setRenderHint(QPainter.RenderHint.Antialiasing)
+        p.setPen(QPen(QColor(10, 10, 10), 4, Qt.PenStyle.SolidLine, Qt.PenCapStyle.RoundCap,
+                      Qt.PenJoinStyle.RoundJoin))
+        p.drawLine(a, b)
+        p.end()
+        self._refresh()
+
+    def _accept(self):
+        if not self._strokes:
+            QMessageBox.information(self, "Signature", "Draw your signature first.")
+            return
+        SIGNATURE_FILE.parent.mkdir(parents=True, exist_ok=True)
+        self.canvas.save(str(SIGNATURE_FILE), "PNG")
+        self.accept()
+
+
+# ---------------------------------------------------------------- preview widget
+
+class Preview(QWidget):
+    """The rendered form with a frame around each field. Clicking places a new field."""
+
+    clicked = Signal(float, float)          # position in image pixels
+    field_clicked = Signal(int)
+
+    def __init__(self):
+        super().__init__()
+        self.setMinimumSize(420, 420)
+        self.pix: QPixmap | None = None
+        self.size_px = (1, 1)
+        self.fields: list[forms.Field] = []
+        self.selected = -1
+        self.placing = False
+        self.setMouseTracking(True)
+
+    def set_pixmap(self, pix: QPixmap | None, size_px: tuple[int, int]):
+        self.pix, self.size_px = pix, size_px
+        self.update()
+
+    def _rect(self) -> QRectF:
+        if self.pix is None:
+            return QRectF()
+        k = min(self.width() / self.pix.width(), self.height() / self.pix.height())
+        w, h = self.pix.width() * k, self.pix.height() * k
+        return QRectF((self.width() - w) / 2, (self.height() - h) / 2, w, h)
+
+    def paintEvent(self, _):
+        p = QPainter(self)
+        p.setRenderHint(QPainter.RenderHint.SmoothPixmapTransform)
+        p.fillRect(self.rect(), self.palette().window())
+        if self.pix is None:
+            return
+        r = self._rect()
+        p.drawPixmap(r.toRect(), self.pix)
+        k = r.width() / self.size_px[0]
+        for i, f in enumerate(self.fields):
+            x, y, w, h = f.box
+            col = QColor(KIND_COLORS.get(f.kind, "#888"))
+            sel = i == self.selected
+            col.setAlpha(255 if sel else 150)
+            p.setPen(QPen(col, 2.5 if sel else 1.2, Qt.PenStyle.SolidLine if sel else Qt.PenStyle.DashLine))
+            p.setBrush(QColor(col.red(), col.green(), col.blue(), 40 if sel else 14))
+            p.drawRect(QRectF(r.x() + x * k, r.y() + y * k, w * k, h * k))
+
+    def mousePressEvent(self, e):
+        r = self._rect()
+        if self.pix is None or not r.contains(e.position()):
+            return
+        k = self.size_px[0] / r.width()
+        ix, iy = (e.position().x() - r.x()) * k, (e.position().y() - r.y()) * k
+        if self.placing:
+            self.clicked.emit(ix, iy)
+            return
+        for i in range(len(self.fields) - 1, -1, -1):
+            x, y, w, h = self.fields[i].box
+            if x <= ix <= x + w and y <= iy <= y + h:
+                self.field_clicked.emit(i)
+                return
+
+
+# ------------------------------------------------------------------- the window
+
+class FormFiller(QDialog):
+    def __init__(self, path: str, cfg: dict):
+        super().__init__()
+        self.path, self.cfg = path, cfg
+        self.setWindowTitle(f"Fill form — {Path(path).name}")
+        self.resize(1180, 760)
+        self.fields: list[forms.Field] = []
+        self.size_px = (1, 1)
+        self.base = None                       # downscaled image for quick previews
+        self.k = 1.0
+        self.rows: list[QWidget] = []
+        self._saved_sig = str(SIGNATURE_FILE) if SIGNATURE_FILE.exists() else ""
+        self._timer = QTimer(self, singleShot=True, interval=120)
+        self._timer.timeout.connect(self._redraw)
+
+        root = QHBoxLayout(self)
+        self.preview = Preview()
+        self.preview.field_clicked.connect(self._select)
+        self.preview.clicked.connect(self._place)
+        root.addWidget(self.preview, 3)
+
+        side = QVBoxLayout()
+        root.addLayout(side, 2)
+        self.status = QLabel("Reading the form…")
+        self.status.setWordWrap(True)
+        self.status.setMinimumWidth(200)
+        side.addWidget(self.status)
+
+        self.scroll = QScrollArea()
+        self.scroll.setWidgetResizable(True)
+        self.scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        self.holder = QWidget()
+        self.form = QVBoxLayout(self.holder)
+        self.form.setAlignment(Qt.AlignmentFlag.AlignTop)
+        self.scroll.setWidget(self.holder)
+        side.addWidget(self.scroll, 1)
+
+        add = QHBoxLayout()
+        add.addWidget(QLabel("Missed one? Add:"))
+        for text, kind in (("Text", "text"), ("Check box", "checkbox"), ("Signature", "signature")):
+            b = QPushButton("+ " + text)
+            b.clicked.connect(lambda _=False, k=kind: self._start_placing(k))
+            add.addWidget(b)
+        add.addStretch(1)
+        side.addLayout(add)
+
+        look = QHBoxLayout()
+        self.style = QComboBox()
+        self.style.addItems(list(forms.FONTS))
+        self.ink = QComboBox()
+        self.ink.addItems(list(forms.INKS))
+        self.size = QSlider(Qt.Orientation.Horizontal)
+        self.size.setRange(60, 160)
+        self.size.setValue(105)
+        self.size.setFixedWidth(90)
+        for w in (self.style, self.ink):
+            w.currentIndexChanged.connect(self._changed)
+        self.size.valueChanged.connect(self._changed)
+        look.addWidget(QLabel("Writing:"))
+        look.addWidget(self.style)
+        look.addWidget(self.ink)
+        look.addWidget(QLabel("Size"))
+        look.addWidget(self.size)
+        look.addStretch(1)
+        side.addLayout(look)
+
+        bottom = QHBoxLayout()
+        self.note = QLabel("")
+        self.note.setWordWrap(True)
+        bottom.addWidget(self.note, 1)
+        cancel = QPushButton("Close")
+        cancel.clicked.connect(self.reject)
+        self.save_btn = QPushButton("Save filled image")
+        self.save_btn.setDefault(True)
+        self.save_btn.setEnabled(False)
+        self.save_btn.clicked.connect(self._save)
+        bottom.addWidget(cancel)
+        bottom.addWidget(self.save_btn)
+        side.addLayout(bottom)
+
+        self._placing_kind: str | None = None
+        self.worker = _Detect(path, cfg)
+        self.worker.done.connect(self._detected)
+        self.worker.failed.connect(self._failed)
+        self.worker.start()
+
+    # ------------------------------------------------------------- detection
+
+    def _failed(self, message: str):
+        self.status.setText(message)
+        self.status.setStyleSheet("color: #d9534f")
+
+    def _detected(self, fields: list, size: tuple):
+        from PIL import Image
+        self.fields, self.size_px = fields, tuple(size)
+        full = forms.load_image(self.path)
+        self.k = min(1.0, PREVIEW_SIDE / max(full.size))
+        self.base = full.resize((max(1, round(full.width * self.k)), max(1, round(full.height * self.k))),
+                                Image.LANCZOS) if self.k != 1.0 else full
+        for f in self.fields:
+            if f.kind == "signature":
+                f.sign_path = self._saved_sig
+        n = {k: sum(1 for f in fields if f.kind == k) for k in ("text", "checkbox", "signature")}
+        self.status.setText(
+            f"Found {n['text']} text field(s), {n['checkbox']} check box(es) and {n['signature']} signature "
+            "line(s). Fill them in on the right; click a frame on the form to jump to it. "
+            "If one was missed, add it with the buttons below, then click where it goes on the form.")
+        self.status.setStyleSheet("")
+        self.save_btn.setEnabled(True)
+        self._rebuild_rows()
+        self._redraw()
+
+    # ---------------------------------------------------------------- rows
+
+    def _rebuild_rows(self):
+        for w in self.rows:
+            w.setParent(None)
+            w.deleteLater()
+        self.rows = []
+        for i, f in enumerate(self.fields):
+            row = QWidget()
+            lay = QHBoxLayout(row)
+            lay.setContentsMargins(0, 2, 0, 2)
+            name = QLabel(f.label or {"text": "Text", "checkbox": "Check box", "signature": "Signature"}[f.kind])
+            name.setMinimumWidth(110)
+            name.setMaximumWidth(150)
+            name.setWordWrap(True)
+            if f.kind == "text":
+                lay.addWidget(name)
+                edit = QLineEdit(f.value)
+                edit.setPlaceholderText("type here")
+                edit.textChanged.connect(lambda t, f=f: self._set(f, "value", t))
+                edit.focusInEvent = (lambda ev, i=i, orig=edit.focusInEvent: (self._select(i, focus=False), orig(ev)))
+                lay.addWidget(edit, 1)
+                f._edit = edit                                     # noqa: SLF001 - kept for focusing
+            elif f.kind == "checkbox":
+                box = QCheckBox(f.label or "Check box")
+                box.setChecked(f.checked)
+                box.toggled.connect(lambda v, f=f: self._set(f, "checked", v))
+                lay.addWidget(box, 1)
+            else:
+                lay.addWidget(name)
+                info = QLabel(Path(f.sign_path).name if f.sign_path else "no signature yet")
+                lay.addWidget(info, 1)
+                pick = QPushButton("Choose image…")
+                pick.clicked.connect(lambda _=False, f=f, info=info: self._choose_signature(f, info))
+                draw = QPushButton("Draw…")
+                draw.clicked.connect(lambda _=False, f=f, info=info: self._draw_signature(f, info))
+                lay.addWidget(pick)
+                lay.addWidget(draw)
+            gone = QPushButton("✕")
+            gone.setFixedWidth(28)
+            gone.setToolTip("Remove this field")
+            gone.clicked.connect(lambda _=False, f=f: self._remove(f))
+            lay.addWidget(gone)
+            self.form.addWidget(row)
+            self.rows.append(row)
+
+    def _set(self, f, attr, value):
+        setattr(f, attr, value)
+        self._changed()
+
+    def _remove(self, f):
+        self.fields.remove(f)
+        self.preview.selected = -1
+        self._rebuild_rows()
+        self._changed()
+
+    def _select(self, i: int, focus: bool = True):
+        self.preview.selected = i
+        self.preview.update()
+        if focus and i < len(self.fields):
+            edit = getattr(self.fields[i], "_edit", None)
+            if edit is not None:
+                edit.setFocus()
+            if i < len(self.rows):
+                self.scroll.ensureWidgetVisible(self.rows[i])
+
+    # ------------------------------------------------------------- signatures
+
+    def _remember(self, path: str) -> str:
+        try:
+            SIGNATURE_FILE.parent.mkdir(parents=True, exist_ok=True)
+            if Path(path).resolve() != SIGNATURE_FILE.resolve():
+                shutil.copyfile(path, SIGNATURE_FILE)
+            self._saved_sig = str(SIGNATURE_FILE)
+            return self._saved_sig
+        except OSError:
+            return path
+
+    def _apply_signature(self, f, path: str, info: QLabel):
+        f.sign_path = self._remember(path)
+        info.setText("signature added")
+        for other in self.fields:                  # one signature, used on every signature line
+            if other.kind == "signature" and not other.sign_path:
+                other.sign_path = f.sign_path
+        self._rebuild_rows()
+        self._changed()
+
+    def _choose_signature(self, f, info):
+        path, _ = QFileDialog.getOpenFileName(self, "Choose your signature picture", "",
+                                              "Pictures (*.png *.jpg *.jpeg *.bmp *.gif *.webp)")
+        if path:
+            self._apply_signature(f, path, info)
+
+    def _draw_signature(self, f, info):
+        pad = SignaturePad(self)
+        if pad.exec():
+            self._apply_signature(f, str(SIGNATURE_FILE), info)
+
+    # ------------------------------------------------------------ add fields
+
+    def _start_placing(self, kind: str):
+        self._placing_kind = kind
+        self.preview.placing = True
+        self.preview.setCursor(Qt.CursorShape.CrossCursor)
+        self.note.setText({"text": "Click on the form where the text should be written (on its line).",
+                           "checkbox": "Click the centre of the check box.",
+                           "signature": "Click on the signature line."}[kind])
+
+    def _place(self, x: float, y: float):
+        kind = self._placing_kind or "text"
+        W, H = self.size_px
+        sizes = [f.size for f in self.fields if f.kind == "text" and f.size]
+        size = sorted(sizes)[len(sizes) // 2] if sizes else max(14.0, H * 0.02)
+        if kind == "checkbox":
+            side = next((f.box[2] for f in self.fields if f.kind == "checkbox"), max(18.0, W * 0.028))
+            f = forms.Field("checkbox", "", (x - side / 2, y - side / 2, side, side))
+        elif kind == "signature":
+            hbox = max(3.2 * size, H * 0.05)
+            f = forms.Field("signature", "", (x, y - hbox, min(W * 0.35, W - x - 8), hbox), size,
+                            sign_path=self._saved_sig)
+        else:
+            f = forms.Field("text", "", (x, y - 1.3 * size, min(W * 0.4, W - x - 8), 1.3 * size), size)
+        self.fields.append(f)
+        self._placing_kind = None
+        self.preview.placing = False
+        self.preview.unsetCursor()
+        self.note.setText("")
+        self._rebuild_rows()
+        self._select(len(self.fields) - 1)
+        self._changed()
+
+    # ---------------------------------------------------------------- output
+
+    def _changed(self, *_):
+        self._timer.start()
+
+    def _redraw(self):
+        if self.base is None:
+            return
+        img = forms.render(self.path, self.fields, self.style.currentText(), self.ink.currentText(),
+                           self.size.value(), scale=self.k, base=self.base, prescaled=True)
+        data = img.convert("RGBA").tobytes("raw", "RGBA")
+        qimg = QImage(data, img.width, img.height, QImage.Format.Format_RGBA8888).copy()
+        self.preview.fields = self.fields
+        self.preview.set_pixmap(QPixmap.fromImage(qimg), self.size_px)
+
+    def _save(self):
+        try:
+            out = forms.save_filled(self.path, self.fields, self.style.currentText(),
+                                    self.ink.currentText(), self.size.value())
+        except Exception as e:                      # noqa: BLE001 - shown to the user
+            log.exception("Saving the filled form failed")
+            QMessageBox.warning(self, "Fill form", f"Couldn't save: {e}")
+            return
+        box = QMessageBox(self)
+        box.setWindowTitle("Fill form")
+        box.setText(f"Saved {out.name}\nnext to the original, which is unchanged.")
+        show = box.addButton("Show in folder", QMessageBox.ButtonRole.ActionRole)
+        box.addButton("Close", QMessageBox.ButtonRole.AcceptRole)
+        box.exec()
+        if box.clickedButton() is show:
+            os.startfile(out.parent)
+        self.accept()

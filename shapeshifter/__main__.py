@@ -17,7 +17,7 @@ import logging
 import os
 import sys
 
-CLI_COMMANDS = {"convert", "targets", "identify", "install", "uninstall", "register", "selftest",
+CLI_COMMANDS = {"convert", "targets", "identify", "fill", "install", "uninstall", "register", "selftest",
                 "-h", "--help", "--version"}
 
 
@@ -120,6 +120,46 @@ def cmd_identify(path: str) -> int:
         print(f"  {fmt:8} {conf:4.0%}  {ev}")
     if rep["conversions"]:
         print("Can become: " + ", ".join(rep["conversions"]))
+    return 0
+
+
+def cmd_fill(args) -> int:
+    """List a form picture's fields, or fill it from the command line (the wheel's window does the same)."""
+    from . import config, forms
+    if args.gui:
+        from PySide6.QtWidgets import QApplication
+        from .formfill import show_form_filler
+        app = QApplication.instance() or QApplication(sys.argv[:1])
+        show_form_filler(args.file, config.load())
+        return app.exec()
+    fields, (w, h) = forms.detect(args.file, config.load())
+    if args.list or not (args.set or args.tick or args.sign):
+        print(f"{w}x{h}: {len(fields)} field(s)")
+        for f in fields:
+            x, y, fw, fh = f.box
+            print(f"  {f.kind:9} {f.label or '(unlabelled)':32} at {x:.0f},{y:.0f}  {fw:.0f}x{fh:.0f}")
+        return 0
+
+    def find(label: str, kinds: tuple[str, ...]):
+        want = label.strip().lower()
+        cands = [f for f in fields if f.kind in kinds]
+        hit = next((f for f in cands if f.label.lower() == want), None)             or next((f for f in cands if want in f.label.lower()), None)
+        if hit is None:
+            raise SystemExit(f"No {'/'.join(kinds)} field called '{label}'. Found: "
+                             + ", ".join(f.label or '(unlabelled)' for f in cands))
+        return hit
+
+    for item in args.set or []:
+        label, _, value = item.partition("=")
+        find(label, ("text",)).value = value
+    for label in args.tick or []:
+        find(label, ("checkbox",)).checked = True
+    if args.sign:
+        for f in fields:
+            if f.kind == "signature":
+                f.sign_path = args.sign
+    out = forms.save_filled(args.file, fields, args.style, args.ink)
+    print(f"Saved {out}")
     return 0
 
 
@@ -242,6 +282,11 @@ def main(argv: list[str] | None = None) -> int:
     argv = sys.argv[1:] if argv is None else argv
     if argv and argv[0] in CLI_COMMANDS:
         _attach_console()
+        for stream in (sys.stdout, sys.stderr):          # piped output on a legacy code page
+            try:
+                stream.reconfigure(encoding="utf-8", errors="replace")
+            except (AttributeError, ValueError):
+                pass
     config.setup_logging()
 
     ap = argparse.ArgumentParser(prog="shapeshifter", description="Convert files in place.")
@@ -257,6 +302,15 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("file")
     p = sub.add_parser("identify", help="say what a file really is")
     p.add_argument("file")
+    p = sub.add_parser("fill", help="find and fill the blanks of a form picture")
+    p.add_argument("file")
+    p.add_argument("--list", action="store_true", help="only list the fields found")
+    p.add_argument("--set", action="append", metavar="LABEL=TEXT", help="text for a field")
+    p.add_argument("--tick", action="append", metavar="LABEL", help="tick a check box")
+    p.add_argument("--sign", metavar="PICTURE", help="signature picture for the signature line")
+    p.add_argument("--style", default="Typed", choices=["Typed", "Handwriting", "Typewriter"])
+    p.add_argument("--ink", default="Blue", choices=["Blue", "Black", "Red"])
+    p.add_argument("--gui", action="store_true", help="open the fill window")
     sub.add_parser("daemon", help="tray icon + global hotkeys")
     sub.add_parser("settings", help="open the settings app")
     p = sub.add_parser("install", help="register context menu, shortcuts, autostart")
@@ -279,6 +333,8 @@ def main(argv: list[str] | None = None) -> int:
             return cmd_targets(args.file)
         if args.cmd == "identify":
             return cmd_identify(args.file)
+        if args.cmd == "fill":
+            return cmd_fill(args)
         if args.cmd == "settings":
             return cmd_settings()
         if args.cmd == "daemon":

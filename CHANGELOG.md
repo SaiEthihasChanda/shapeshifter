@@ -1,8 +1,12 @@
 # Changelog
 
-## 2.3.1
-- New **Word + picture** target for images: embeds the picture in a Word document (no OCR needed), so a
-  photo can be edited in Word and converted back to an image or PDF with the added text.
+## 2.4.0
+- **Fill form** for pictures of forms: finds blanks, check boxes and signature lines, opens a window to type
+  answers, tick boxes and add a drawn or imported signature, and saves a filled copy beside the original.
+  Also available as `shapeshifter fill`.
+- New **Word + picture** target for images: embeds the picture in a Word document (no OCR needed).
+- Options that come from reading the file's contents (OCR, Word + picture, OCR PDF, Fill form) now share one
+  **Inferred** group on the wheel.
 
 ## 2.3.0
 - Multi-ring wheel with rotating reveal animation and type-to-search.

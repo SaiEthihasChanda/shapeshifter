@@ -81,6 +81,8 @@ def options_for(path: str | Path, include_hidden_engine_targets: bool = False,
             if (o.on_wheel or include_hidden_engine_targets) and o.fmt != src:
                 opts.append(o)
         opts += _learned_options(src, {o.key for o in opts})
+        if _can_fill_forms(src):
+            opts.append(TargetOption(key="fill", kind="fill"))
     if ident.details.get("sensitive"):
         # Private keys & keystores: only re-encodings of the same secret, never documents.
         opts = [o for o in opts if o.kind in ("rename", "inspect") or o.fmt in SENSITIVE_OK]
@@ -90,6 +92,14 @@ def options_for(path: str | Path, include_hidden_engine_targets: bool = False,
 
 
 SENSITIVE_OK = {"pem", "der"}
+
+
+def _can_fill_forms(src: str) -> bool:
+    """Forms are filled on a picture, which needs the OCR engine to find the blanks."""
+    from . import ocr
+    from .backends.images import ImageBackend
+    return (src in ImageBackend().sources() and src not in ("svg", "eps", "psd", "dds", "icns")
+            and ocr.available())
 
 
 def _learned_options(src: str, have: set[str]) -> list[TargetOption]:
@@ -129,7 +139,8 @@ def visible_options(paths: list[str | Path], cfg: dict,
     hidden = set(cfg.get("hidden_pairs", []))
     sources = {forced.get(str(p)) or identify(p).fmt for p in paths}
     opts = [o for o in _common(paths, False, forced)
-            if not (o.kind == "convert" and any(f"{s}>{o.fmt}" in hidden for s in sources))]
+            if not (o.kind == "convert" and any(f"{s}>{o.fmt}" in hidden for s in sources))
+            and not (o.kind == "fill" and len(paths) != 1)]      # a form is filled one at a time
     return opts[: max(1, int(cfg.get("max_segments", 16)))]
 
 

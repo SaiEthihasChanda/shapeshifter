@@ -261,6 +261,8 @@ class WheelView(QWidget):
             return ["extract", "unpack"]
         if opt.kind == "inspect":
             return ["inspect", "info"]
+        if opt.kind == "fill":
+            return ["fill", "form", "write", "type", "sign", "signature", "checkbox", "inferred"]
         return search_terms(opt.fmt) if opt.fmt else []
 
     def matches(self) -> list[int]:
@@ -523,7 +525,7 @@ class WheelView(QWidget):
             elif self.hover >= 0:
                 opt = self.options[self.hover]
                 top = {"rename": "rename to", "extract": "archive", "inspect": "show",
-                       "assume": "treat as"}.get(opt.kind, f"{src_label}  →")
+                       "assume": "treat as", "fill": "inferred"}.get(opt.kind, f"{src_label}  →")
                 label = opt.label
                 self._center_text(p, box, top, 11 * ls, dim, dy=-18)
                 self._center_text(p, box, label, (24 if len(label) <= 5 else 17) * ls, text,
@@ -841,6 +843,11 @@ class WheelOverlay(WheelView):
             from .inspector import show_inspector
             for p in self.paths[:5]:
                 show_inspector(p)
+            self.dismiss()
+            return
+        if target == "fill":
+            from .formfill import show_form_filler
+            show_form_filler(self.paths[0], self.cfg)
             self.dismiss()
             return
         if target.startswith("assume:"):

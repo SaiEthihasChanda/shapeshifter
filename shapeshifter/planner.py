@@ -14,7 +14,7 @@ from functools import lru_cache
 from .backends import ALL_BACKENDS, Backend
 from .backends.archives import EXTRACT
 from .backends.media import REMUX
-from .formats import category, file_ext, label_of, name_of, rank
+from .formats import PSEUDO_FORMATS, category, file_ext, label_of, name_of, rank
 
 log = logging.getLogger(__name__)
 
@@ -65,6 +65,7 @@ CONTENT_DROPPING = {"first_frame", "first_sheet", "text_only"}
 
 # Anything that loses something costs extra, so a route that keeps the pictures (DOCX ->
 # HTML -> PDF -> PNG) beats an equally long one that keeps only the text.
+INFERRING_BACKENDS = {"ocr", "picturedoc"}
 LOSSY_FLAGS = {"lossy", "recompress", "reencode"} | CONTENT_DROPPING
 
 
@@ -89,6 +90,8 @@ class TargetOption:
             return "EXTRACT"
         if self.kind == "inspect":
             return "INSPECT"
+        if self.kind == "fill":
+            return "FILL FORM"
         return label_of(self.fmt)
 
     @property
@@ -101,9 +104,17 @@ class TargetOption:
             return "Unpack here"
         if self.kind == "inspect":
             return "What is it?"
+        if self.inferred:
+            return "Inferred"
         if self.learned:
             return "Learned"
         return category(self.fmt).capitalize()
+
+    @property
+    def inferred(self) -> bool:
+        """Comes from reading the file's contents (OCR, picture embedding, form filling)."""
+        return (self.kind == "fill" or (self.kind == "convert" and (
+            self.fmt in PSEUDO_FORMATS or any(e.backend.name in INFERRING_BACKENDS for e in self.path))))
 
     @property
     def category(self) -> str:
@@ -111,6 +122,8 @@ class TargetOption:
             return "tool"
         if self.kind == "extract":
             return "archive"
+        if self.inferred:
+            return "inferred"
         return category(self.fmt)   # convert / assume
 
     @property
@@ -131,6 +144,9 @@ class TargetOption:
             return f"Not sure what this is — treat it as {name_of(self.fmt)}, then pick a format"
         if self.kind == "extract":
             return "Unpacks the archive into a folder next to it"
+        if self.kind == "fill":
+            return ("Opens the form with its blanks, check boxes and signature line found for you. "
+                    "Type the answers; the original picture is kept and a filled copy is saved beside it.")
         if self.fmt == "docxpic":
             return ("Puts the picture on a Word page so you can type next to it or over it. "
                     "Convert the document back to an image to bake the text in.")
@@ -326,15 +342,17 @@ def export_graph(path, fmt: str = "dot") -> int:
 def ordered(options: list[TargetOption], src_fmt: str | None) -> list[TargetOption]:
     """Wheel order: fix-name first, same category as the source, then by category/rank."""
     src_cat = category(src_fmt) if src_fmt else "image"
-    cats = [src_cat] + [c for c in ("image", "video", "audio", "document", "data", "code",
-                                    "subtitle", "model", "font", "security", "archive")
-                        if c != src_cat]
+    cats = [src_cat, "inferred"] + [c for c in ("image", "video", "audio", "document", "data", "code",
+                                                "subtitle", "model", "font", "security", "archive")
+                                    if c != src_cat]
     order = {c: i for i, c in enumerate(cats)}
-    kind_order = {"assume": 0, "rename": 0, "convert": 1, "extract": 2, "inspect": 3}
+    kind_order = {"assume": 0, "rename": 0, "convert": 1, "fill": 1, "extract": 2, "inspect": 3}
 
     def key(o: TargetOption):
         if o.kind == "assume":
             return (0, 0, (0, ""))       # keep the candidates' confidence order
+        if o.kind == "fill":
+            return (1, order["inferred"], (-1, ""))      # first in the inferred group
         if o.kind != "convert":
             return (kind_order[o.kind], 0, (0, ""))
         return (1, order.get(o.category, 9), rank(o.fmt))

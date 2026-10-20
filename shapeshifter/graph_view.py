@@ -389,7 +389,7 @@ class GraphView(QGraphicsView):
 
 GOLDEN_ANGLE = math.pi * (3 - math.sqrt(5))
 CAT_ORDER = ["image", "video", "audio", "document", "data", "code", "subtitle", "model", "font",
-             "security", "archive", "program", "tool"]
+             "security", "archive", "program", "inferred", "tool"]
 
 
 class SNode:
