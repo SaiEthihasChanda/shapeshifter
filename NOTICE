@@ -1,0 +1,9 @@
+ShapeShifter
+Copyright (C) 2026 Sai Ethihas Chanda
+
+ShapeShifter is free software: you can redistribute it and/or modify it under the terms of the
+GNU Affero General Public License as published by the Free Software Foundation, either version 3
+of the License, or (at your option) any later version. See LICENSE.
+
+It bundles third-party software under its own licences: see THIRD-PARTY-NOTICES.md.
+Notably, PyMuPDF/MuPDF (AGPL-3.0) and the ffmpeg build (GPL-3.0) are included in the Windows installer.

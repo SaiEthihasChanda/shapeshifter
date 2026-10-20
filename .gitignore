@@ -1,0 +1,11 @@
+.venv/
+__pycache__/
+*.egg-info/
+build/
+dist/
+.pytest_cache/
+.build/
+graphify-out/
+.claude/
+*.pfx
+*.p12

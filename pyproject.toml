@@ -1,0 +1,51 @@
+[build-system]
+requires = ["setuptools>=77"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "shapeshifter"
+version = "2.3.0"
+description = "Convert any file to another format in place on Windows, from a radial wheel"
+readme = "README.md"
+requires-python = ">=3.10"
+license = "AGPL-3.0-or-later"
+license-files = ["LICENSE", "THIRD-PARTY-NOTICES.md"]
+authors = [{ name = "Sai Ethihas Chanda" }]
+keywords = ["file converter", "windows", "ocr", "pdf", "docx", "ffmpeg"]
+classifiers = [
+    "Operating System :: Microsoft :: Windows",
+    "Environment :: Win32 (MS Windows)",
+    "Intended Audience :: End Users/Desktop",
+    "Topic :: Multimedia :: Graphics :: Graphics Conversion",
+    "Topic :: Utilities",
+]
+dependencies = [
+    "PySide6-Essentials>=6.5",
+    "pillow>=10.0",
+    "pillow-heif>=0.13",
+    "pymupdf>=1.23",
+    "pywin32>=306",
+    "send2trash>=1.8",
+    "openpyxl>=3.1",
+    "pyyaml>=6.0",
+    "comtypes>=1.2",
+    "py7zr>=0.20",
+]
+
+[project.urls]
+Homepage = "https://github.com/SaiEthihasChanda/shapeshifter"
+Source = "https://github.com/SaiEthihasChanda/shapeshifter"
+Issues = "https://github.com/SaiEthihasChanda/shapeshifter/issues"
+
+[project.optional-dependencies]
+# Last-resort AI file-type detection; installable from Settings › Engines.
+magika = ["magika>=0.5"]
+
+[project.scripts]
+shapeshifter = "shapeshifter.__main__:main"
+
+[project.gui-scripts]
+shapeshifter-gui = "shapeshifter.__main__:main"
+
+[tool.setuptools.packages.find]
+include = ["shapeshifter*"]
