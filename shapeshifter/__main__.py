@@ -17,7 +17,7 @@ import logging
 import os
 import sys
 
-CLI_COMMANDS = {"convert", "targets", "identify", "fill", "install", "uninstall", "register", "selftest",
+CLI_COMMANDS = {"convert", "combine", "targets", "identify", "fill", "install", "uninstall", "register", "selftest",
                 "-h", "--help", "--version"}
 
 
@@ -101,6 +101,19 @@ def cmd_convert(paths: list[str], target: str, original: str | None) -> int:
             failures += 1
             print(f"{os.path.basename(p)}: {e}", file=sys.stderr)
     return 1 if failures else 0
+
+
+def cmd_combine(paths: list[str], target: str) -> int:
+    from . import config, engine
+    from .backends import Context, ConversionError
+    from .formats import canonical
+    try:
+        res = engine.combine_inplace(_abs(paths), canonical(target), Context(cfg=config.load()))
+    except ConversionError as e:
+        print(e, file=sys.stderr)
+        return 1
+    print(f"{len(paths)} files -> {res.outputs[0].name} (originals kept)")
+    return 0
 
 
 def cmd_targets(path: str) -> int:
@@ -304,6 +317,9 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--to", required=True, help="target, e.g. png, extract, rename:png")
     p.add_argument("--original", choices=["recycle", "keep", "delete"])
     p.add_argument("files", nargs="+")
+    p = sub.add_parser("combine", help="combine several files into one (pictures -> GIF/PDF, CSVs -> workbook…)")
+    p.add_argument("--to", required=True, help="pdf, gif, xlsx, mp4, …")
+    p.add_argument("files", nargs="+")
     p = sub.add_parser("targets", help="list what a file can become")
     p.add_argument("file")
     p = sub.add_parser("identify", help="say what a file really is")
@@ -335,6 +351,8 @@ def main(argv: list[str] | None = None) -> int:
             return cmd_open(args.files)
         if args.cmd == "convert":
             return cmd_convert(args.files, args.to, args.original)
+        if args.cmd == "combine":
+            return cmd_combine(args.files, args.to)
         if args.cmd == "targets":
             return cmd_targets(args.file)
         if args.cmd == "identify":

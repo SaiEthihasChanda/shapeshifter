@@ -104,6 +104,8 @@ class TargetOption:
             return "INSPECT"
         if self.kind == "fill":
             return "FILL FORM"
+        if self.kind == "combine":
+            return "ONE " + label_of(self.fmt)
         return label_of(self.fmt)
 
     @property
@@ -116,6 +118,8 @@ class TargetOption:
             return "Unpack here"
         if self.kind == "inspect":
             return "What is it?"
+        if self.kind == "combine":
+            return "Combine"
         if self.variants:
             return "Asks how"
         if self.variant_label:
@@ -158,6 +162,9 @@ class TargetOption:
     def description(self) -> str:
         if self.variant_note:
             return self.variant_note
+        if self.kind == "combine":
+            return (f"Combines all the selected files into one {label_of(self.fmt)}, in name order. "
+                    "The originals are kept.")
         if self.variants:
             return "Asks how: " + " or ".join(v.variant_label.lower() for v in self.variants)
         if self.kind == "rename":
@@ -383,7 +390,7 @@ def ordered(options: list[TargetOption], src_fmt: str | None) -> list[TargetOpti
                                                 "subtitle", "model", "font", "security", "archive")
                                     if c != src_cat]
     order = {c: i for i, c in enumerate(cats)}
-    kind_order = {"assume": 0, "rename": 0, "convert": 1, "fill": 1, "extract": 2, "inspect": 3}
+    kind_order = {"assume": 0, "rename": 0, "combine": 0, "convert": 1, "fill": 1, "extract": 2, "inspect": 3}
 
     def key(o: TargetOption):
         if o.kind == "assume":

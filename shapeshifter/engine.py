@@ -255,7 +255,44 @@ def visible_options(paths: list[str | Path], cfg: dict,
     sources = {forced.get(str(p)) or identify(p).fmt for p in paths}
     opts = [o for o in _common(paths, False, forced)
             if not (o.kind == "convert" and any(f"{s}>{o.fmt}" in hidden for s in sources))]
+    if len(paths) > 1:
+        opts = combine_options(paths) + opts
     return opts[: max(1, int(cfg.get("max_segments", 16)))]
+
+
+def combine_options(paths: list) -> list[TargetOption]:
+    """With several files selected: the formats they can all be combined into."""
+    from . import combine
+    return [TargetOption(key=f"combine:{fmt}", kind="combine", fmt=fmt) for fmt in combine.targets_for(paths)]
+
+
+def combine_inplace(paths: list, target: str, ctx: Context) -> "Result":
+    """Combine the files into one new file next to the first. The originals are never removed."""
+    from . import combine
+    files = combine.natural_sorted(paths)
+    for p in files:
+        if not p.is_file():
+            raise ConversionError(f"File not found: {p.name}")
+        ident = identify(p)
+        if ident.risky:
+            raise RiskyFile(f"Not combined: {p.name}: {ident.risky}")
+    fmt = canonical(target.split(":", 1)[-1])
+    if fmt not in combine.targets_for(files):
+        raise ConversionError(f"These files can't be combined into {fmt.upper()}.")
+    try:
+        work = Path(tempfile.mkdtemp(prefix=".ipconv-", dir=files[0].parent))
+        _hide(work)
+    except OSError:
+        work = Path(tempfile.mkdtemp(prefix="ipconv-"))
+    try:
+        made = combine.run(files, fmt, work / combine.output_name(files, fmt), ctx)
+        ctx.check_cancel()
+        final = unique_path(files[0].parent / made.name)
+        shutil.move(str(made), final)
+    finally:
+        shutil.rmtree(work, ignore_errors=True)
+    log.info("Combined %d files into %s", len(files), final)
+    return Result(source=files[0], outputs=[final], original="kept")
 
 
 def visible_targets(paths: list[str | Path], cfg: dict) -> list[str]:

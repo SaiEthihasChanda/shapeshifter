@@ -105,6 +105,19 @@ class Worker(QThread):
     def run(self):
         results, errors = [], []
         n = len(self.paths)
+        if self.target.startswith("combine:"):                 # all the files become one
+            ctx = Context(cfg=self.cfg, cancel_event=self.cancel_event, progress=lambda f: self.progress.emit(f, 0))
+            try:
+                results.append(engine.combine_inplace(self.paths, self.target, ctx))
+            except Cancelled:
+                errors.append((self.paths[0], "Cancelled"))
+            except ConversionError as e:
+                errors.append((self.paths[0], str(e)))
+            except Exception as e:
+                log.exception("Combining crashed")
+                errors.append((self.paths[0], f"Unexpected error: {e}"))
+            self.finished_all.emit(results, errors)
+            return
         for i, p in enumerate(self.paths):
             if self.cancel_event.is_set():
                 break
@@ -282,6 +295,8 @@ class WheelView(QWidget):
             return ["inspect", "info"]
         if opt.kind == "fill":
             return ["fill", "form", "write", "type", "sign", "signature", "checkbox", "inferred"]
+        if opt.kind == "combine":
+            return ["combine", "merge", "join", "one", "all", *search_terms(opt.fmt)]
         return search_terms(opt.fmt) if opt.fmt else []
 
     def matches(self) -> list[int]:
@@ -546,7 +561,7 @@ class WheelView(QWidget):
             elif self.hover >= 0:
                 opt = self.options[self.hover]
                 top = {"rename": "rename to", "extract": "archive", "inspect": "show",
-                       "assume": "treat as", "fill": "inferred"}.get(opt.kind, f"{src_label}  →")
+                       "assume": "treat as", "fill": "inferred", "combine": "combine all"}.get(opt.kind, f"{src_label}  →")
                 label = opt.label
                 self._center_text(p, box, top, 11 * ls, dim, dy=-18)
                 self._center_text(p, box, label, (24 if len(label) <= 5 else 17) * ls, text,
