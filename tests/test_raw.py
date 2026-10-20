@@ -51,6 +51,12 @@ class TestExtraction:
         assert Image.open(io.BytesIO(data[4:end])).size == (300, 200)
         assert raw.jpeg_end(b"\xff\xd8\xff\xe0\x00\x04", 0) is None
 
+    def test_a_preview_that_ends_exactly_at_the_end_of_the_file(self):
+        noisy = io.BytesIO()
+        Image.effect_noise((300, 200), 90).convert("RGB").save(noisy, "JPEG")
+        data = b"II*\x00" + b"\x00" * 20 + noisy.getvalue()            # nothing follows the end-of-image marker
+        assert raw.preview_candidates(data)[0][0] == 300 * 200
+
     def test_orientation_is_read_in_either_byte_order(self, tmp_path):
         for order in "<>":
             assert raw.tiff_orientation(make_raw(tmp_path / "o.nef", orientation=6, byte_order=order).read_bytes()) == 6

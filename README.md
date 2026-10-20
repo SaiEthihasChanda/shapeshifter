@@ -177,6 +177,72 @@ Detection uses Windows OCR plus a look at the pixels, so very skewed, low-contra
 fields added by hand. Pages that are rotated by the PDF itself (sideways scans) aren't read well yet, and password-protected
 PDFs can't be filled.
 
+## Tables, in and out of documents
+
+ShapeShifter finds tables and uses them as data. **PDF, Word, OpenDocument, web pages, Markdown, PowerPoint slides and even
+pictures** (read with Windows OCR) can become **CSV, TSV, Excel, ODS or JSON**, and spreadsheets and CSV files can become
+**HTML, Markdown, Word, PDF or ODS** tables. In a PDF, a table whose header repeats on the next page is joined into one, and
+cell text is read from the cells themselves (so `14-07-2025` stays that). Tables read from a picture or a PDF's page layout carry
+a warning: check the columns. Longer routes chain these steps (SQLite → Excel → Word, picture of a table → Excel → PDF).
+
+## Presentations
+
+**PPTX, PPSX and ODP** are read from their shapes (text boxes, bullets, pictures, tables, colours, speaker notes) and can be
+drawn to **PDF**, turned into outlines (**text, Markdown, HTML, Word**), or converted **between PPTX and ODP**. **PDFs, pictures and
+documents become slides** (a PDF page becomes a picture slide, with its text as alt text; Word and Markdown headings become slide
+titles). Slides are redrawn, not rendered by PowerPoint, so fonts, effects and animations are simplified (the wheel says so).
+Old **.ppt** files are read for their text. The PPTX files ShapeShifter writes follow the standard and open in pandoc; they
+haven't been opened in PowerPoint itself.
+
+## Ways to reach a target
+
+A target can mean different things, so the wheel asks, but **only when the file really has a choice**:
+
+| From | To | Ways |
+|---|---|---|
+| Picture | DOCX | *Text (OCR)* / *Picture* (the picture on a Word page) |
+| Picture | PDF | *Picture* / *Searchable* (adds a text layer) |
+| Animated GIF / WebP / TIFF | PNG, JPG, … | *Keep animation* or *First frame* / *Every frame* / *Sprite sheet* |
+| Workbook or database (several sheets) | CSV, TSV | *First sheet* / *Every sheet* (one file each) |
+| Several-page PDF, Word, slides | PNG, JPG, WebP | *One image per page* / *First page only* / *One tall image* |
+| Video (long) | GIF | *Standard* / *Small and quick* / *First 10 seconds* |
+| Video | PNG, JPG, WebP | *Middle frame* / *First frame* / *A frame every few seconds* / *Contact sheet* |
+| Video | MP4, MKV, … | *Best match* / *Smaller file* / *No sound* |
+
+Videos also offer **subtitle extraction** (SRT, VTT) when they contain subtitles, and audio targets only when they have sound.
+The centre of the wheel (or Esc) goes back out of a question. From the command line: `convert --to png#frames file.gif`.
+
+## Combining several files
+
+Select **more than one** file and the wheel offers **ONE …** segments, the inverse of the splits above: pictures → animated **GIF /
+WebP**, multi-page **TIFF**, **PDF** (a page each), a **slide deck** or a **slideshow video**; PDFs (and pictures) → one **PDF**; CSV / TSV /
+Excel files → **one workbook** with a sheet each; Word, Markdown, HTML or text → one **PDF / DOCX / Markdown**; decks → one deck;
+audio or video clips → one file; fonts → a **TTC**. Files are taken in name order (`frame2` before `frame10`) and are never removed.
+`shapeshifter combine --to pdf *.png`.
+
+## Doing something to a file that keeps it the same kind
+
+Next to the conversions the wheel offers **same-format actions** (grey): **SMALLER** and **RESIZE** (pictures), **ROTATE / FLIP**,
+**NO LOCATION** (removes camera, date and GPS data when the picture has any), PDF **SMALLER**, **SPLIT** into pages, **GET PICTURES**
+and **ROTATE**, **TIDY** for JSON and XML (pretty / minify / sorted), **FIX TEXT** (UTF-8 and line endings), audio **EVEN VOLUME** and
+**SMALLER**, and video **SMALLER** and **NO SOUND**. The result is a new file such as `photo (smaller).jpg` and the original follows
+your usual setting (Recycle Bin by default).
+
+## Older and other files
+
+| Kind | What you get |
+|---|---|
+| **.doc, .xls, .ppt** (Word, Excel, PowerPoint 97–2003) | read natively: text and tables, cell values (dates included) and slide text, not formatting or pictures; LibreOffice does it better when installed |
+| **RTF**, **ODT** | read and written natively, to and from Word, Markdown, HTML, text and PDF |
+| **.msg** (Outlook) | to e-mail with attachments, then text, HTML, Markdown, PDF |
+| **Camera RAW** (CR2, NEF, ARW, DNG, ORF, RW2, RAF) | the full-size JPEG the camera stored in the file, then any picture format. This is a preview, not developed sensor data |
+| **glTF / GLB** | to and from OBJ, STL and PLY |
+| **TTC** | split into separate TTFs, and fonts combined into a TTC |
+| **RAR/CBR, ISO, CAB, WIM, DMG, VHD(X), VMDK, QCOW2, SquashFS, RPM, CPIO, XAR, CHM** | with **7-Zip** installed (Settings › Engines): extract, or re-pack as ZIP / 7z / TAR |
+
+Not covered: Parquet, Arrow, Avro, HDF5, MAT (needs large libraries), DJVU, DWG, WOFF2, Apple Pages / Numbers / Keynote,
+Access databases, MIDI and Flash.
+
 ## Risky files are refused
 
 These are never converted, and the wheel says why:
@@ -200,7 +266,9 @@ lossy route, including **multi-step** routes such as comic → PDF → PNG pages
 | ffmpeg | All audio and video, video → GIF, soundtrack extraction |
 | Built-in data | CSV, TSV, XLSX, SQLite, JSON, YAML, TOML, XML, INI |
 | Built-in archives | ZIP ↔ 7z ↔ TAR/.gz/.bz2/.xz, Extract here |
-| pandoc / LibreOffice (optional) | Rich documents: DOCX, ODT, EPUB, PPTX, XLS, … |
+| Built-in tables, presentations, documents | Tables ↔ data, PPTX/ODP slides, DOCX/ODT/RTF, legacy DOC/XLS/PPT, Outlook MSG, camera RAW previews, glTF |
+| 7-Zip (optional) | RAR, ISO, CAB, WIM, DMG, VHD(X), … |
+| pandoc / LibreOffice (optional) | Rich documents: DOCX, ODT, EPUB, PPTX, XLS, … (pandoc and LibreOffice win over the built-in readers when installed) |
 
 *Settings › General › Prefer ShapeShifter's own converters* routes through the native
 engine first. Anything it can't handle, such as a progressive JPEG or a very large
@@ -255,6 +323,10 @@ ShapeShifter.exe convert --to webp *.png          # or: python -m shapeshifter �
 ShapeShifter.exe convert --to extract backup.7z
 ShapeShifter.exe identify mystery.dat              # what is it, and how sure?
 ShapeShifter.exe targets photo.heic                # what can it become (with routes/warnings)
+ShapeShifter.exe convert --to png#frames anim.gif  # a specific way (see "Ways to reach a target")
+ShapeShifter.exe convert --to act:resize#1280 p.jpg   # a same-format action
+ShapeShifter.exe combine --to pdf scan*.png        # several files into one
+ShapeShifter.exe fill form.pdf --list              # find (or fill) the blanks of a form
 ShapeShifter.exe selftest                          # check every engine
 ShapeShifter.exe settings | daemon | install | uninstall | register
 ```

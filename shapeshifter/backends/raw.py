@@ -21,7 +21,7 @@ SOI = b"\xff\xd8\xff"
 def jpeg_end(data: bytes, start: int) -> int | None:
     """Offset just past the end of the JPEG that begins at ``start`` (walks the marker segments)."""
     i, n = start + 2, len(data)
-    while i + 4 <= n:
+    while i + 2 <= n:                                         # the end-of-image marker may be the file's last two bytes
         if data[i] != 0xFF:
             return None
         marker = data[i + 1]
@@ -31,6 +31,8 @@ def jpeg_end(data: bytes, start: int) -> int | None:
         if marker == 0xD9:
             return i + 2
         if marker == 0xDA:                                   # image data: runs to the next real marker
+            if i + 4 > n:
+                return None
             i += 2 + struct.unpack_from(">H", data, i + 2)[0]
             while True:
                 j = data.find(b"\xff", i)
@@ -46,6 +48,8 @@ def jpeg_end(data: bytes, start: int) -> int | None:
         if marker in (0x01,) or 0xD0 <= marker <= 0xD8:
             i += 2
             continue
+        if i + 4 > n:
+            return None
         i += 2 + struct.unpack_from(">H", data, i + 2)[0]
     return None
 

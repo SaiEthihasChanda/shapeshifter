@@ -289,6 +289,98 @@ def cmd_selftest() -> int:
         check(f"ffmpeg WAV -> MP3 ({ffmpeg_path()})", lambda: conv(wav, "mp3"))
     else:
         print("skip  ffmpeg not found")
+    # tables, presentations, documents, "ways", combining, actions, legacy readers, RAW, 3D
+    def tables_check():
+        import pymupdf
+        p = d / "grid.pdf"
+        doc = pymupdf.open()
+        page = doc.new_page()
+        for r in range(3):
+            for c in range(2):
+                rect = pymupdf.Rect(50 + c * 100, 60 + r * 24, 150 + c * 100, 84 + r * 24)
+                page.draw_rect(rect, width=0.8)
+                page.insert_text((rect.x0 + 6, rect.y1 - 7), f"r{r}c{c}", fontsize=10)
+        doc.save(p)
+        doc.close()
+        import openpyxl
+        out = engine.convert_inplace(p, "xlsx", Context(cfg=cfg)).outputs[0]
+        rows = [[c.value for c in r] for r in openpyxl.load_workbook(out).active.iter_rows()]
+        if rows != [["r0c0", "r0c1"], ["r1c0", "r1c1"], ["r2c0", "r2c1"]]:
+            raise RuntimeError(f"unexpected table {rows!r}")
+        return f"{out.name}: {len(rows)} rows"
+    check("tables PDF -> XLSX", tables_check)
+
+    def deck_check():
+        import pymupdf
+        pptx = engine.convert_inplace(doc_md, "pptx", Context(cfg=cfg)).outputs[0]
+        out = engine.convert_inplace(pptx, "pdf", Context(cfg=cfg)).outputs[0]
+        with pymupdf.open(out) as pages:
+            if not pages.page_count or "Doc" not in pages[0].get_text():
+                raise RuntimeError("the slide text was lost")
+        return f"{pptx.name} -> {out.name}"
+    check("slides MD -> PPTX -> PDF", deck_check)
+
+    def docs_check():
+        odt = engine.convert_inplace(doc_md, "odt", Context(cfg=cfg)).outputs[0]
+        rtf = engine.convert_inplace(odt, "rtf", Context(cfg=cfg)).outputs[0]
+        return f"{odt.name} -> {rtf.name}"
+    check("documents MD -> ODT -> RTF", docs_check)
+
+    def ways_check():
+        gif = d / "anim.gif"
+        frames = [Image.new("RGB", (30, 20), (40 * i, 90, 160)) for i in range(3)]
+        frames[0].save(gif, save_all=True, append_images=frames[1:], duration=100, loop=0)
+        outs = engine.convert_inplace(gif, "png#frames", Context(cfg=cfg)).outputs
+        if len(outs) != 3:
+            raise RuntimeError(f"{len(outs)} frames instead of 3")
+        return f"{len(outs)} frames"
+    check("ways GIF -> every frame", ways_check)
+
+    def combine_check():
+        a, b = d / "c1.png", d / "c2.png"
+        Image.new("RGB", (40, 30), "red").save(a)
+        Image.new("RGB", (40, 30), "blue").save(b)
+        res = engine.combine_inplace([str(a), str(b)], "combine:pdf", Context(cfg=cfg))
+        return res.outputs[0].name
+    check("combine PNG + PNG -> PDF", combine_check)
+
+    def action_check():
+        j = d / "pic.jpg"
+        Image.new("RGB", (400, 300), (10, 100, 200)).save(j, quality=95)
+        out = engine.convert_inplace(j, "act:resize#half", Context(cfg=cfg)).outputs[0]
+        with Image.open(out) as im:
+            if im.size != (200, 150):
+                raise RuntimeError(f"size {im.size}")
+        return out.name
+    check("action resize", action_check)
+
+    def legacy_check():
+        from .native import legacy, ole
+        import struct
+        # a minimal compound file is enough to prove the OLE reader is bundled
+        header = bytearray(512)
+        header[0:8] = ole.SIGNATURE
+        try:
+            ole.OleFile(bytes(header))
+        except ole.OleError:
+            pass
+        return "OLE reader loaded" if legacy and struct else ""
+    check("legacy Office readers load", legacy_check)
+
+    def raw_check():
+        import io
+        from .backends import raw
+        buf = io.BytesIO()
+        Image.effect_noise((300, 200), 90).convert("RGB").save(buf, "JPEG")          # busy enough to exceed the 2 KB floor
+        found = raw.preview_candidates(b"II*\x00" + b"\0" * 20 + buf.getvalue())
+        if not found or found[0][0] != 300 * 200:
+            raise RuntimeError("preview not found")
+        return "preview found"
+    check("RAW preview extraction", raw_check)
+
+    glb_obj = d / "tri2.obj"
+    glb_obj.write_text("v 0 0 0\nv 1 0 0\nv 0 1 0\nf 1 2 3\n")
+    check("3D OBJ -> GLB", lambda: conv(glb_obj, "glb"))
     check("UI Automation (mouse triggers)", lambda: (explorer._automation(), "")[1])
     import shutil
     shutil.rmtree(d, ignore_errors=True)

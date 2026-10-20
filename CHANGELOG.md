@@ -1,6 +1,13 @@
 # Changelog
 
-## 2.4.0
+## 2.5.0
+- **Tables** in both directions between documents and data: PDF, Word, ODT, HTML, Markdown, slides and pictures ↔ CSV / TSV / Excel / ODS / JSON, and spreadsheets → HTML / Markdown / Word / PDF.
+- **Presentations**: PPTX / ODP read, drawn to PDF, turned into outlines, converted to each other; PDFs, pictures and documents → slides.
+- **More ways to choose**: every frame / sheet / page, video frames, contact sheets, subtitle extraction, smaller / silent / short video and GIF.
+- **Combine** several selected files (pictures → GIF / PDF / deck / slideshow, PDFs, workbooks, documents, decks, audio and video, fonts).
+- **Same-format actions**: smaller, resize, rotate, no location, PDF split / compress / pictures, tidy JSON, fix text, audio volume, video smaller / no sound.
+- **Older and other files**: .doc / .xls / .ppt, RTF and ODT writing, Outlook .msg, camera RAW previews, glTF / GLB, TTC fonts, and many more archive types through 7-Zip.
+- Fixes: a PDF layout that could loop forever on wide tables, a UTF-16 text file mistaken for MP3, text-heavy slides rendering slowly.
 - **Fill form** for pictures and PDFs of forms: finds blanks, check boxes and signature lines, opens a window to type
   answers, tick boxes and add a drawn or imported signature, and saves a filled copy beside the original.
   PDFs are filled across all pages (answers laid over the page, real PDF form fields filled natively), and several
