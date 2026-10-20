@@ -847,7 +847,8 @@ class WheelOverlay(WheelView):
             return
         if target == "fill":
             from .formfill import show_form_filler
-            show_form_filler(self.paths[0], self.cfg)
+            for p in self.paths[:5]:                       # one window per form
+                show_form_filler(p, self.cfg)
             self.dismiss()
             return
         if target.startswith("assume:"):

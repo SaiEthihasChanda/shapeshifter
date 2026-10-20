@@ -37,8 +37,9 @@ def show_form_filler(path: str, cfg: dict | None = None) -> None:
 
 
 class _Detect(QThread):
-    done = Signal(list, tuple)
+    done = Signal(list, list)
     failed = Signal(str)
+    progress = Signal(int, int)
 
     def __init__(self, path: str, cfg: dict):
         super().__init__()
@@ -46,8 +47,8 @@ class _Detect(QThread):
 
     def run(self):
         try:
-            fields, size = forms.detect(self.path, self.cfg)
-            self.done.emit(fields, size)
+            fields, sizes = forms.detect_document(self.path, self.cfg, progress=self.progress.emit)
+            self.done.emit(fields, sizes)
         except ConversionError as e:
             self.failed.emit(str(e))
         except Exception as e:                      # noqa: BLE001 - shown to the user
@@ -199,10 +200,10 @@ class FormFiller(QDialog):
         self.path, self.cfg = path, cfg
         self.setWindowTitle(f"Fill form — {Path(path).name}")
         self.resize(1180, 760)
-        self.fields: list[forms.Field] = []
-        self.size_px = (1, 1)
-        self.base = None                       # downscaled image for quick previews
-        self.k = 1.0
+        self.fields: list[forms.Field] = []    # every field of every page
+        self.sizes: list[tuple[int, int]] = [(1, 1)]
+        self.page = 0
+        self._bases: dict[int, tuple] = {}     # page -> (downscaled image, scale) for quick previews
         self.rows: list[QWidget] = []
         self._saved_sig = str(SIGNATURE_FILE) if SIGNATURE_FILE.exists() else ""
         self._timer = QTimer(self, singleShot=True, interval=120)
@@ -220,6 +221,20 @@ class FormFiller(QDialog):
         self.status.setWordWrap(True)
         self.status.setMinimumWidth(200)
         side.addWidget(self.status)
+
+        self.nav = QWidget()
+        nav = QHBoxLayout(self.nav)
+        nav.setContentsMargins(0, 0, 0, 0)
+        self.prev_btn = QPushButton("‹ Previous page")
+        self.next_btn = QPushButton("Next page ›")
+        self.page_label = QLabel("")
+        self.prev_btn.clicked.connect(lambda: self._go(-1))
+        self.next_btn.clicked.connect(lambda: self._go(1))
+        nav.addWidget(self.prev_btn)
+        nav.addWidget(self.page_label, 1, Qt.AlignmentFlag.AlignCenter)
+        nav.addWidget(self.next_btn)
+        self.nav.hide()
+        side.addWidget(self.nav)
 
         self.scroll = QScrollArea()
         self.scroll.setWidgetResizable(True)
@@ -265,7 +280,7 @@ class FormFiller(QDialog):
         bottom.addWidget(self.note, 1)
         cancel = QPushButton("Close")
         cancel.clicked.connect(self.reject)
-        self.save_btn = QPushButton("Save filled image")
+        self.save_btn = QPushButton("Save filled PDF" if forms.is_pdf(path) else "Save filled image")
         self.save_btn.setDefault(True)
         self.save_btn.setEnabled(False)
         self.save_btn.clicked.connect(self._save)
@@ -276,6 +291,7 @@ class FormFiller(QDialog):
         self._placing_kind: str | None = None
         self.worker = _Detect(path, cfg)
         self.worker.done.connect(self._detected)
+        self.worker.progress.connect(lambda i, n: self.status.setText(f"Reading the form… page {i} of {n}"))
         self.worker.failed.connect(self._failed)
         self.worker.start()
 
@@ -285,23 +301,57 @@ class FormFiller(QDialog):
         self.status.setText(message)
         self.status.setStyleSheet("color: #d9534f")
 
-    def _detected(self, fields: list, size: tuple):
-        from PIL import Image
-        self.fields, self.size_px = fields, tuple(size)
-        full = forms.load_image(self.path)
-        self.k = min(1.0, PREVIEW_SIDE / max(full.size))
-        self.base = full.resize((max(1, round(full.width * self.k)), max(1, round(full.height * self.k))),
-                                Image.LANCZOS) if self.k != 1.0 else full
+    def cur(self) -> list:
+        """The fields of the page being shown."""
+        return [f for f in self.fields if f.page == self.page]
+
+    def _base(self):
+        """(downscaled page image, scale) for the page being shown."""
+        got = self._bases.get(self.page)
+        if got is None:
+            from PIL import Image
+            full = forms.load_image(self.path, self.page)
+            k = min(1.0, PREVIEW_SIDE / max(full.size))
+            img = full.resize((max(1, round(full.width * k)), max(1, round(full.height * k))),
+                              Image.LANCZOS) if k != 1.0 else full
+            got = self._bases[self.page] = (img, k)
+        return got
+
+    def _detected(self, fields: list, sizes: list):
+        self.fields, self.sizes = fields, [tuple(z) for z in sizes]
         for f in self.fields:
             if f.kind == "signature":
                 f.sign_path = self._saved_sig
         n = {k: sum(1 for f in fields if f.kind == k) for k in ("text", "checkbox", "signature")}
+        pages = f" on {len(self.sizes)} pages" if len(self.sizes) > 1 else ""
+        native = any(f.widget for f in fields)
         self.status.setText(
             f"Found {n['text']} text field(s), {n['checkbox']} check box(es) and {n['signature']} signature "
-            "line(s). Fill them in on the right; click a frame on the form to jump to it. "
-            "If one was missed, add it with the buttons below, then click where it goes on the form.")
+            f"line(s){pages}. Fill them in on the right; click a frame on the form to jump to it. "
+            "If one was missed, add it with the buttons below, then click where it goes on the form."
+            + (" Fields that are part of the PDF itself stay fillable in the saved copy." if native else ""))
         self.status.setStyleSheet("")
         self.save_btn.setEnabled(True)
+        self._update_nav()
+        self._rebuild_rows()
+        self._redraw()
+
+    def _update_nav(self):
+        many = len(self.sizes) > 1
+        self.nav.setVisible(many)
+        self.page_label.setText(f"Page {self.page + 1} of {len(self.sizes)}")
+        self.prev_btn.setEnabled(self.page > 0)
+        self.next_btn.setEnabled(self.page < len(self.sizes) - 1)
+
+    def _go(self, delta: int):
+        page = max(0, min(len(self.sizes) - 1, self.page + delta))
+        if page == self.page:
+            return
+        self.page = page
+        self.preview.selected = -1
+        self._placing_kind = None
+        self.preview.placing = False
+        self._update_nav()
         self._rebuild_rows()
         self._redraw()
 
@@ -312,7 +362,7 @@ class FormFiller(QDialog):
             w.setParent(None)
             w.deleteLater()
         self.rows = []
-        for i, f in enumerate(self.fields):
+        for i, f in enumerate(self.cur()):
             row = QWidget()
             lay = QHBoxLayout(row)
             lay.setContentsMargins(0, 2, 0, 2)
@@ -364,8 +414,9 @@ class FormFiller(QDialog):
     def _select(self, i: int, focus: bool = True):
         self.preview.selected = i
         self.preview.update()
-        if focus and i < len(self.fields):
-            edit = getattr(self.fields[i], "_edit", None)
+        cur = self.cur()
+        if focus and i < len(cur):
+            edit = getattr(cur[i], "_edit", None)
             if edit is not None:
                 edit.setFocus()
             if i < len(self.rows):
@@ -386,7 +437,7 @@ class FormFiller(QDialog):
     def _apply_signature(self, f, path: str, info: QLabel):
         f.sign_path = self._remember(path)
         info.setText("signature added")
-        for other in self.fields:                  # one signature, used on every signature line
+        for other in self.fields:                  # one signature, used on every signature line (all pages)
             if other.kind == "signature" and not other.sign_path:
                 other.sign_path = f.sign_path
         self._rebuild_rows()
@@ -415,25 +466,26 @@ class FormFiller(QDialog):
 
     def _place(self, x: float, y: float):
         kind = self._placing_kind or "text"
-        W, H = self.size_px
-        sizes = [f.size for f in self.fields if f.kind == "text" and f.size]
+        W, H = self.sizes[self.page]
+        sizes = [f.size for f in self.cur() if f.kind == "text" and f.size]
         size = sorted(sizes)[len(sizes) // 2] if sizes else max(14.0, H * 0.02)
         if kind == "checkbox":
-            side = next((f.box[2] for f in self.fields if f.kind == "checkbox"), max(18.0, W * 0.028))
-            f = forms.Field("checkbox", "", (x - side / 2, y - side / 2, side, side))
+            side = next((f.box[2] for f in self.cur() if f.kind == "checkbox"), max(18.0, W * 0.028))
+            f = forms.Field("checkbox", "", (x - side / 2, y - side / 2, side, side), page=self.page)
         elif kind == "signature":
             hbox = max(3.2 * size, H * 0.05)
             f = forms.Field("signature", "", (x, y - hbox, min(W * 0.35, W - x - 8), hbox), size,
-                            sign_path=self._saved_sig)
+                            sign_path=self._saved_sig, page=self.page)
         else:
-            f = forms.Field("text", "", (x, y - 1.3 * size, min(W * 0.4, W - x - 8), 1.3 * size), size)
+            f = forms.Field("text", "", (x, y - 1.3 * size, min(W * 0.4, W - x - 8), 1.3 * size), size,
+                            page=self.page)
         self.fields.append(f)
         self._placing_kind = None
         self.preview.placing = False
         self.preview.unsetCursor()
         self.note.setText("")
         self._rebuild_rows()
-        self._select(len(self.fields) - 1)
+        self._select(len(self.cur()) - 1)
         self._changed()
 
     # ---------------------------------------------------------------- output
@@ -442,14 +494,16 @@ class FormFiller(QDialog):
         self._timer.start()
 
     def _redraw(self):
-        if self.base is None:
-            return
-        img = forms.render(self.path, self.fields, self.style.currentText(), self.ink.currentText(),
-                           self.size.value(), scale=self.k, base=self.base, prescaled=True)
+        if len(self.sizes) == 1 and self.sizes[0] == (1, 1):
+            return                                  # nothing detected yet
+        base, k = self._base()
+        fields = self.cur()
+        img = forms.render(self.path, fields, self.style.currentText(), self.ink.currentText(),
+                           self.size.value(), scale=k, base=base, prescaled=True)
         data = img.convert("RGBA").tobytes("raw", "RGBA")
         qimg = QImage(data, img.width, img.height, QImage.Format.Format_RGBA8888).copy()
-        self.preview.fields = self.fields
-        self.preview.set_pixmap(QPixmap.fromImage(qimg), self.size_px)
+        self.preview.fields = fields
+        self.preview.set_pixmap(QPixmap.fromImage(qimg), self.sizes[self.page])
 
     def _save(self):
         try:

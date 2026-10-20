@@ -132,12 +132,14 @@ def cmd_fill(args) -> int:
         app = QApplication.instance() or QApplication(sys.argv[:1])
         show_form_filler(args.file, config.load())
         return app.exec()
-    fields, (w, h) = forms.detect(args.file, config.load())
+    fields, sizes = forms.detect_document(args.file, config.load())
     if args.list or not (args.set or args.tick or args.sign):
-        print(f"{w}x{h}: {len(fields)} field(s)")
+        print(f"{len(sizes)} page(s), {len(fields)} field(s)")
         for f in fields:
             x, y, fw, fh = f.box
-            print(f"  {f.kind:9} {f.label or '(unlabelled)':32} at {x:.0f},{y:.0f}  {fw:.0f}x{fh:.0f}")
+            where = f"p{f.page + 1} " if len(sizes) > 1 else ""
+            native = " (form field)" if f.widget else ""
+            print(f"  {where}{f.kind:9} {f.label or '(unlabelled)':32} at {x:.0f},{y:.0f}  {fw:.0f}x{fh:.0f}{native}")
         return 0
 
     def find(label: str, kinds: tuple[str, ...]):

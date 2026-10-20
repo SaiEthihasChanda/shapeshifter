@@ -98,8 +98,8 @@ def _can_fill_forms(src: str) -> bool:
     """Forms are filled on a picture, which needs the OCR engine to find the blanks."""
     from . import ocr
     from .backends.images import ImageBackend
-    return (src in ImageBackend().sources() and src not in ("svg", "eps", "psd", "dds", "icns")
-            and ocr.available())
+    pictures = src in ImageBackend().sources() and src not in ("svg", "eps", "psd", "dds", "icns")
+    return (pictures or src == "pdf") and ocr.available()
 
 
 def _learned_options(src: str, have: set[str]) -> list[TargetOption]:
@@ -139,8 +139,7 @@ def visible_options(paths: list[str | Path], cfg: dict,
     hidden = set(cfg.get("hidden_pairs", []))
     sources = {forced.get(str(p)) or identify(p).fmt for p in paths}
     opts = [o for o in _common(paths, False, forced)
-            if not (o.kind == "convert" and any(f"{s}>{o.fmt}" in hidden for s in sources))
-            and not (o.kind == "fill" and len(paths) != 1)]      # a form is filled one at a time
+            if not (o.kind == "convert" and any(f"{s}>{o.fmt}" in hidden for s in sources))]
     return opts[: max(1, int(cfg.get("max_segments", 16)))]
 
 

@@ -18,6 +18,9 @@ from . import ocr
 
 log = logging.getLogger(__name__)
 
+DPI = 200                       # PDF pages are read (and written on) at this resolution
+MAX_PAGE_SIDE = 3200            # ...but never larger than this many pixels
+MAX_PAGES = 30
 ANALYSIS_SIDE = 1600            # pixel analysis runs on a copy at most this big
 DARK = 150                      # grey level below which a pixel counts as ink
 SIGN_WORDS = re.compile(r"\b(signature|signed|sign here|sign)\b", re.I)
@@ -39,12 +42,39 @@ class Field:
     value: str = ""
     checked: bool = False
     sign_path: str = ""                      # signature fields: the image to place
+    page: int = 0                            # PDF page the field is on (0 for a picture)
+    widget: int = 0                          # xref of a real PDF form field, filled natively
 
 
 # ------------------------------------------------------------------ loading
 
-def load_image(path):
+def is_pdf(path) -> bool:
+    try:
+        with open(path, "rb") as fh:
+            return fh.read(1024).lstrip(b"\x00\xef\xbb\xbf \r\n\t").startswith(b"%PDF-")
+    except OSError:
+        return False
+
+
+def pdf_dpi(page) -> int:
+    """Resolution to read a PDF page at: DPI, less for huge pages."""
+    side = max(page.rect.width, page.rect.height) or 1.0
+    return max(36, int(min(DPI, MAX_PAGE_SIDE * 72.0 / side)))
+
+
+def render_pdf_page(page):
+    from PIL import Image
+    pix = page.get_pixmap(dpi=pdf_dpi(page), alpha=False)
+    return Image.frombytes("RGB", (pix.width, pix.height), pix.samples)
+
+
+def load_image(path, page: int = 0):
+    """A picture file, or one page of a PDF, as an RGB image."""
     from PIL import Image, ImageOps
+    if is_pdf(path):
+        import pymupdf
+        with pymupdf.open(path) as doc:
+            return render_pdf_page(doc[page])
     with Image.open(path) as im:
         im.seek(0)
         im = ImageOps.exif_transpose(im)
@@ -281,7 +311,82 @@ def detect(path, cfg: dict | None = None, cancel=None) -> tuple[list[Field], tup
         else:
             fields.append(Field("text", label, (x0f, rbase - 1.3 * lh, x1f - x0f, 1.3 * lh), lh))
     fields.sort(key=lambda f: (int((f.box[1] + f.box[3] / 2) // 25), f.box[0]))
+    sizes = sorted(f.size for f in fields if f.kind == "text" and f.size)
+    if sizes:                                       # one size for every answer on the page
+        typical = sizes[len(sizes) // 2]
+        for f in fields:
+            if f.kind == "text":
+                f.size = typical
     return fields, (W, H)
+
+
+def _widget_fields(page, k: float, index: int) -> list[Field]:
+    """The real (fillable) form fields of a PDF page, as Field objects in page-image pixels."""
+    import pymupdf as mu
+    out: list[Field] = []
+    for w in list(page.widgets() or []):
+        r = w.rect * page.rotation_matrix
+        box = (r.x0 * k, r.y0 * k, r.width * k, r.height * k)
+        label = (w.field_label or w.field_name or "").strip()
+        t = w.field_type
+        if t in (mu.PDF_WIDGET_TYPE_TEXT, mu.PDF_WIDGET_TYPE_COMBOBOX, mu.PDF_WIDGET_TYPE_LISTBOX):
+            out.append(Field("text", label, box, box[3] * 0.7, value=str(w.field_value or ""),
+                             page=index, widget=w.xref))
+        elif t in (mu.PDF_WIDGET_TYPE_CHECKBOX, mu.PDF_WIDGET_TYPE_RADIOBUTTON):
+            on = w.field_value not in (None, "", "Off", False)
+            name = label
+            if t == mu.PDF_WIDGET_TYPE_RADIOBUTTON:
+                state = w.on_state()
+                name = f"{label}: {state}" if isinstance(state, str) and state not in ("Off", "") else label
+            out.append(Field("checkbox", name, box, checked=bool(on), page=index, widget=w.xref))
+        elif t == mu.PDF_WIDGET_TYPE_SIGNATURE:
+            out.append(Field("signature", label or "Signature", box, box[3] * 0.4, page=index))
+    return out
+
+
+def detect_document(path, cfg: dict | None = None, cancel=None, progress=None):
+    """Fields of a picture or every page of a PDF: (fields, [(width, height) per page]).
+
+    A PDF page with real form fields uses those; any other page is read like a picture."""
+    if not is_pdf(path):
+        fields, size = detect(path, cfg, cancel)
+        return fields, [size]
+    import tempfile
+
+    import pymupdf
+    from .core import ConversionError
+    try:
+        doc = pymupdf.open(path)
+    except Exception as e:                           # noqa: BLE001
+        raise ConversionError(f"Couldn't open this PDF: {e}") from e
+    with doc:
+        if doc.needs_pass:
+            raise ConversionError("This PDF is password-protected, so it can't be filled in.")
+        n = min(len(doc), MAX_PAGES)
+        fields: list[Field] = []
+        sizes: list[tuple[int, int]] = []
+        with tempfile.TemporaryDirectory(prefix="ss-form-") as tmp:
+            for i in range(n):
+                if cancel is not None and cancel.is_set():
+                    from .core import Cancelled
+                    raise Cancelled()
+                page = doc[i]
+                k = pdf_dpi(page) / 72.0
+                img = render_pdf_page(page)
+                sizes.append(img.size)
+                native = _widget_fields(page, k, i)
+                if native:
+                    fields += native
+                else:
+                    shot = Path(tmp) / f"page{i}.png"
+                    img.save(shot)
+                    found, _ = detect(shot, cfg, cancel)
+                    for f in found:
+                        f.page = i
+                    fields += found
+                if progress:
+                    progress(i + 1, n)
+    return fields, sizes
 
 
 # ---------------------------------------------------------------- rendering
@@ -325,14 +430,9 @@ def signature_image(src):
         return out.crop(box) if box else out
 
 
-def render(path, fields: list[Field], style: str = "Typed", ink: str = "Blue",
-           size_pct: float = 100.0, scale: float = 1.0, base=None, prescaled: bool = False):
-    """The picture with every field's content drawn on. ``scale`` < 1 gives a quick preview."""
+def _paint(img, fields: list[Field], style: str, ink: str, size_pct: float, scale: float) -> None:
+    """Draw every field's content onto an RGBA image (in place)."""
     from PIL import Image, ImageDraw
-    img = (base if base is not None else load_image(path)).copy()
-    if scale != 1.0 and not prescaled:
-        img = img.resize((max(1, round(img.width * scale)), max(1, round(img.height * scale))), Image.LANCZOS)
-    img = img.convert("RGBA")
     draw = ImageDraw.Draw(img)
     color = INKS.get(ink, INKS["Blue"]) + (255,)
     for f in fields:
@@ -357,12 +457,26 @@ def render(path, fields: list[Field], style: str = "Typed", ink: str = "Blue",
                 size -= 1
                 font = find_font(style, size)
             draw.text((x + 3 * scale, y + h - 0.22 * size), f.value, font=font, fill=color, anchor="ls")
+
+
+def render(path, fields: list[Field], style: str = "Typed", ink: str = "Blue",
+           size_pct: float = 100.0, scale: float = 1.0, base=None, prescaled: bool = False,
+           page: int = 0):
+    """The picture (or one PDF page) with the given fields drawn on. ``scale`` < 1 gives a quick preview."""
+    from PIL import Image
+    img = (base if base is not None else load_image(path, page)).copy()
+    if scale != 1.0 and not prescaled:
+        img = img.resize((max(1, round(img.width * scale)), max(1, round(img.height * scale))), Image.LANCZOS)
+    img = img.convert("RGBA")
+    _paint(img, fields, style, ink, size_pct, scale)
     return img.convert("RGB")
 
 
 def output_path(src: Path) -> Path:
     ext = src.suffix.lower()
-    if ext not in (".png", ".jpg", ".jpeg", ".bmp", ".tif", ".tiff", ".webp"):
+    if is_pdf(src):
+        ext = ".pdf"
+    elif ext not in (".png", ".jpg", ".jpeg", ".bmp", ".tif", ".tiff", ".webp"):
         ext = ".png"
     n, out = 0, src.with_name(f"{src.stem} (filled){ext}")
     while out.exists():
@@ -371,8 +485,57 @@ def output_path(src: Path) -> Path:
     return out
 
 
+def save_filled_pdf(path, fields: list[Field], style="Typed", ink="Blue", size_pct=100.0) -> Path:
+    """Write the answers into a copy of the PDF: real form fields are filled natively, anything
+    else (blanks found by reading the page, check boxes, signatures) is laid over the page."""
+    import io
+
+    import pymupdf
+    from PIL import Image
+    src = Path(path)
+    out = output_path(src)
+    by_page: dict[int, list[Field]] = {}
+    for f in fields:
+        by_page.setdefault(f.page, []).append(f)
+    with pymupdf.open(src) as doc:
+        for index, fs in sorted(by_page.items()):
+            page = doc[index]
+            native = {f.widget: f for f in fs if f.widget}
+            if native:
+                for w in list(page.widgets() or []):
+                    f = native.get(w.xref)
+                    if f is None:
+                        continue
+                    if f.kind == "text":
+                        w.field_value = f.value
+                    else:
+                        state = w.on_state()
+                        w.field_value = (state if isinstance(state, str) else True) if f.checked else (
+                            "Off" if isinstance(state, str) else False)
+                    w.update()
+            drawn = [f for f in fs if not f.widget]
+            if not any(f.value or f.checked or f.sign_path for f in drawn):
+                continue
+            k = pdf_dpi(page) / 72.0
+            canvas = Image.new("RGBA", (max(1, round(page.rect.width * k)), max(1, round(page.rect.height * k))),
+                               (0, 0, 0, 0))
+            _paint(canvas, drawn, style, ink, size_pct, 1.0)
+            rect = page.rect
+            if page.rotation:           # the fields were placed on the page as displayed
+                canvas = canvas.rotate(page.rotation, expand=True)
+                rect = pymupdf.Rect(page.rect * page.derotation_matrix)
+                rect.normalize()
+            buf = io.BytesIO()
+            canvas.save(buf, "PNG")
+            page.insert_image(rect, stream=buf.getvalue(), overlay=True)
+        doc.save(out, garbage=3, deflate=True)
+    return out
+
+
 def save_filled(path, fields: list[Field], style="Typed", ink="Blue", size_pct=100.0) -> Path:
     src = Path(path)
+    if is_pdf(src):
+        return save_filled_pdf(src, fields, style, ink, size_pct)
     out = output_path(src)
     img = render(src, fields, style, ink, size_pct)
     kw = {"quality": 95} if out.suffix.lower() in (".jpg", ".jpeg", ".webp") else {}

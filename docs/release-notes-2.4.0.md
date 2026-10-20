@@ -1,8 +1,8 @@
 # ShapeShifter 2.4.0
 
-**Fill in forms that are only pictures.** Choose **FILL FORM** on the wheel for a photo or scan of a form.
+**Fill in forms that are only pictures or PDFs.** Choose **FILL FORM** on the wheel for a photo, a scan, or a PDF.
 ShapeShifter finds the blanks, check boxes and signature lines; you type the answers, tick boxes and add a signature
-(draw it or import a picture); it saves a filled copy next to the original, which is never changed.
+(draw it or import a picture); it saves a filled copy next to the original, which is never changed. PDFs work page by page; real fillable PDF fields are filled natively and stay editable.
 
 **Also new**
 - **Word + picture** for images: puts the picture on a Word page so you can add text, then convert back to an image or PDF.

@@ -156,7 +156,7 @@ pixels, not as selectable text; follow it with *OCR PDF* if you want it searchab
 
 ## Filling in a form that is only a picture
 
-Pick **FILL FORM** on the wheel for a photo or scan of a form. ShapeShifter finds the blanks next to labels
+Pick **FILL FORM** on the wheel for a photo or scan of a form, or for a **PDF** (scanned, or an ordinary PDF with printed blanks). ShapeShifter finds the blanks next to labels
 (a line or free space), square check boxes and signature lines, and opens a window with the form on the left
 as a live preview and the fields on the right.
 
@@ -165,10 +165,15 @@ as a live preview and the fields on the right.
 - Missed a field? Press **+ Text**, **+ Check box** or **+ Signature**, then click where it goes on the form.
 - Pick the writing style (typed, handwriting, typewriter), ink colour and size. **Save filled image** writes
   `form (filled).png` next to the original, which is never changed.
+- **PDFs:** every page (up to 30) is read, and you move between them with *Previous / Next page*. The saved copy is
+  `form (filled).pdf`: your answers are laid over the original pages, so their text and sharpness are kept. If the PDF has
+  real fillable fields, those are used and filled in natively, so they stay editable in any PDF reader.
+- **Several files:** select more than one form and each opens in its own window.
 - From the command line: `shapeshifter fill form.png --list`, or `shapeshifter fill form.png --set "Full name=Ada" --tick Student --sign sig.png`.
 
 Detection uses Windows OCR plus a look at the pixels, so very skewed, low-contrast or handwritten forms may need
-fields added by hand. One form at a time; scanned PDFs aren't supported yet (convert the page to an image first).
+fields added by hand. Pages that are rotated by the PDF itself (sideways scans) aren't read well yet, and password-protected
+PDFs can't be filled.
 
 ## Risky files are refused
 
