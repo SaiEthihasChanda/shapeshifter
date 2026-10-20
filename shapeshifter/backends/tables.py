@@ -14,7 +14,8 @@ from ..core import Backend, Context, ConversionError, target_ext
 
 log = logging.getLogger(__name__)
 
-DOC_SOURCES = {"pdf", "docx", "odt", "html", "md"}
+DECKS = {"pptx", "odp", "ppsx", "potx"}
+DOC_SOURCES = {"pdf", "docx", "odt", "html", "md"} | DECKS
 DATA_SOURCES = {"csv", "tsv", "xlsx", "ods"}
 DATA_TARGETS = {"csv", "tsv", "xlsx", "json", "ods"}
 DOC_TARGETS = {"html", "md", "docx", "pdf"}
@@ -89,6 +90,8 @@ class TableBackend(Backend):
             return T.from_odt(src)
         if s == "ods":
             return T.from_ods(src)
+        if s in DECKS:
+            return self._deck_tables(src, s)
         if s in ("html", "md"):
             text = src.read_bytes().decode("utf-8-sig", errors="replace")
             return T.from_html(text) if s == "html" else T.from_markdown(text)
@@ -103,6 +106,21 @@ class TableBackend(Backend):
         from .. import forms
         rows = T.rows_from_picture(forms.load_image(src), ctx.cfg, ctx.cancel_event)
         return [T.Table("Table 1", rows)] if rows else []
+
+    @staticmethod
+    def _deck_tables(src: Path, s: str):
+        from ..native import slides, slides_write
+        from ..native import tables as T
+        deck = slides_write.read_odp(src) if s == "odp" else slides.read_pptx(src)
+        out = []
+        for i, slide in enumerate(deck.slides, 1):
+            found = [sh for sh in slide.shapes if sh.kind == "table" and sh.rows]
+            for k, sh in enumerate(found, 1):
+                rows = T._trim(sh.rows)
+                if rows:
+                    base = slide.title or f"Slide {i}"
+                    out.append(T.Table(base if len(found) == 1 else f"{base} table {k}", rows))
+        return out
 
     def _write(self, tables, dst: Path, t: str, stem: str) -> list[Path]:
         from ..native import tables as T

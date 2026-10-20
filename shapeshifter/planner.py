@@ -44,6 +44,9 @@ WARNINGS = {
     "reflow": "Reflowed — the page layout is approximated",
     "table_layout": "Tables are found from the page layout; check the columns",
     "table_picture": "Table read from a picture by OCR; check the columns and numbers",
+    "slides_layout": "Slides are redrawn from their contents; fonts, effects and animations are simplified",
+    "slides_outline": "Keeps the text, tables and pictures, not the slide layout",
+    "pages_as_pictures": "Each page becomes a picture, so the text isn't editable",
 }
 
 
@@ -178,7 +181,8 @@ class TargetOption:
 ENGINE_NAMES = {"images": "Pillow", "mupdf": "PyMuPDF", "ffmpeg": "ffmpeg", "data": "built-in",
                 "archives": "built-in", "pandoc": "pandoc", "libreoffice": "LibreOffice",
                 "native": "native", "custom": "custom format", "ocr": "Windows OCR",
-                "picturedoc": "built-in", "tables": "built-in tables"}
+                "picturedoc": "built-in", "tables": "built-in tables", "slides": "built-in slides",
+                "docread": "built-in"}
 
 
 def edge_flags(src: str, dst: str, backend: Backend) -> frozenset:
@@ -217,6 +221,11 @@ def edge_flags(src: str, dst: str, backend: Backend) -> frozenset:
             f.add("table_layout")
         elif sc == "image":
             f.add("table_picture")
+    if backend.name == "slides":
+        if src in ("pptx", "odp", "ppsx", "potx"):
+            f.add("slides_layout" if dst in ("pdf", "pptx", "odp") else "slides_outline")
+        elif src == "pdf":
+            f.add("pages_as_pictures")
     if backend.name == "mupdf" and src == "pdf" and dst == "html":
         f.add("reflow")
     return frozenset(f)
