@@ -24,12 +24,12 @@ ALIASES = {
 COMPOUND_EXTS = ("tar.gz", "tar.bz2", "tar.xz")
 
 # Extension written for a format when it differs from its id.
-PRIMARY_EXT = {"tgz": "tar.gz", "tbz2": "tar.bz2", "txz": "tar.xz", "pdfocr": "pdf"}
+PRIMARY_EXT = {"tgz": "tar.gz", "tbz2": "tar.bz2", "txz": "tar.xz", "pdfocr": "pdf", "docxpic": "docx"}
 
 # Output-only "formats": a variant of a real format that gets its own wheel segment.
 # (A "searchable PDF" is still a .pdf; it just carries a recognised-text layer.)
-PSEUDO_FORMATS = {"pdfocr"}
-LABELS = {"pdfocr": "OCR PDF"}
+PSEUDO_FORMATS = {"pdfocr", "docxpic"}
+LABELS = {"pdfocr": "OCR PDF", "docxpic": "Word + picture"}
 
 # category -> formats, in the order they should appear on the wheel.
 CATEGORIES = {
@@ -49,6 +49,7 @@ CATEGORIES = {
 
 CATEGORY_OF = {ext: cat for cat, exts in CATEGORIES.items() for ext in exts}
 CATEGORY_OF["pdfocr"] = "document"
+CATEGORY_OF["docxpic"] = "document"
 
 NAMES = {
     "jpg": "JPEG image", "png": "PNG image", "webp": "WebP image", "avif": "AVIF image",
@@ -76,7 +77,7 @@ NAMES = {
     "txz": "XZ TAR archive", "tbz2": "Bzip2 TAR archive", "gz": "Gzip-compressed file",
     "bz2": "Bzip2-compressed file", "xz": "XZ-compressed file", "rar": "RAR archive",
     "jar": "Java archive", "apk": "Android package",
-    "pdfocr": "Searchable PDF (OCR)",
+    "pdfocr": "Searchable PDF (OCR)", "docxpic": "Word document with the picture",
     "exe": "Windows program", "dll": "Windows library", "msi": "Windows installer",
     "elf": "Linux program", "macho": "macOS program", "lnk": "Windows shortcut",
 }

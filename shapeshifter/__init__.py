@@ -1,6 +1,6 @@
 """ShapeShifter - convert files in place through a radial wheel overlay."""
 
-__version__ = "2.3.0"
+__version__ = "2.3.1"
 APP_NAME = "ShapeShifter"
 APP_ID = "ShapeShifter"
 APP_USER_MODEL_ID = "ShapeShifter.App"

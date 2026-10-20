@@ -131,6 +131,9 @@ class TargetOption:
             return f"Not sure what this is — treat it as {name_of(self.fmt)}, then pick a format"
         if self.kind == "extract":
             return "Unpacks the archive into a folder next to it"
+        if self.fmt == "docxpic":
+            return ("Puts the picture on a Word page so you can type next to it or over it. "
+                    "Convert the document back to an image to bake the text in.")
         if self.fmt == "pdfocr":
             return ("Adds an invisible text layer (OCR) so the scan can be searched and copied "
                     "from. The page looks exactly the same.")
@@ -139,7 +142,8 @@ class TargetOption:
 
 ENGINE_NAMES = {"images": "Pillow", "mupdf": "PyMuPDF", "ffmpeg": "ffmpeg", "data": "built-in",
                 "archives": "built-in", "pandoc": "pandoc", "libreoffice": "LibreOffice",
-                "native": "native", "custom": "custom format", "ocr": "Windows OCR"}
+                "native": "native", "custom": "custom format", "ocr": "Windows OCR",
+    "picturedoc": "built-in"}
 
 
 def edge_flags(src: str, dst: str, backend: Backend) -> frozenset:

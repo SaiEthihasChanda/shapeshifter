@@ -205,3 +205,18 @@ def test_scan_to_word_fill_in_and_back_to_an_image(tmp_path):
     image = convert(filled, "png")[0]
     text = ocr.recognize_file(image)[0].text()
     assert "FILLED-IN" in text.upper() and "Baker" in text
+
+
+def test_image_to_word_keeps_the_picture(tmp_path):
+    """Image -> "Word + picture" embeds the photo (no OCR needed), so it survives a round trip."""
+    import zipfile
+    from PIL import Image
+    from shapeshifter import engine, planner
+    src = tmp_path / "photo.png"
+    Image.new("RGB", (64, 48), (200, 30, 30)).save(src)
+    opt = planner.plan("png")["docxpic"]
+    assert opt.label == "Word + picture" and opt.path[0].backend.name == "picturedoc"
+    out = engine.convert_inplace(src, "docxpic", Context(cfg=CFG)).outputs
+    assert out[0].suffix == ".docx"
+    names = zipfile.ZipFile(out[0]).namelist()
+    assert any(n.startswith("word/media/") for n in names)
