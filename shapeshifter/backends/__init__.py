@@ -9,6 +9,7 @@ from ..native.backend import NativeBackend  # noqa: E402
 from .family import FamilyBackend  # noqa: E402
 from .ocr import OcrBackend  # noqa: E402
 from .picturedoc import PictureDocBackend  # noqa: E402
+from .tables import TableBackend  # noqa: E402
 from ..custom import CustomFormatBackend  # noqa: E402
 
 # Each backend contributes edges to the conversion graph (see planner.py). When several
@@ -27,6 +28,7 @@ ALL_BACKENDS: list[Backend] = [
     FamilyBackend(),
     OcrBackend(),
     PictureDocBackend(),
+    TableBackend(),
 ]
 
 __all__ = ["ALL_BACKENDS", "Backend", "Cancelled", "Context", "ConversionError", "RiskyFile"]

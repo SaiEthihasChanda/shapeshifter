@@ -36,12 +36,14 @@ WARNINGS = {
     "no_alpha": "Transparency becomes white",
     "first_frame": "Only the first frame is kept",
     "no_audio": "No sound",
-    "per_page": "One file per page",
+    "per_page": "May produce several files (one per page or table)",
     "first_sheet": "Only the first sheet/table is kept",
     "text_only": "Only the text is kept",
     "layout": "Layout may change",
     "ocr": "Text recognised by OCR — expect a few mistakes; formatting and pictures aren't kept",
     "reflow": "Reflowed — the page layout is approximated",
+    "table_layout": "Tables are found from the page layout; check the columns",
+    "table_picture": "Table read from a picture by OCR; check the columns and numbers",
 }
 
 
@@ -125,7 +127,9 @@ class TargetOption:
         if self.variants or self.variant_label:
             return False
         return (self.kind == "fill" or (self.kind == "convert" and (
-            self.fmt in PSEUDO_FORMATS or any(e.backend.name in INFERRING_BACKENDS for e in self.path))))
+            self.fmt in PSEUDO_FORMATS or any(
+                e.backend.name in INFERRING_BACKENDS
+                or (e.backend.name == "tables" and category(e.src) == "image") for e in self.path))))
 
     @property
     def category(self) -> str:
@@ -174,7 +178,7 @@ class TargetOption:
 ENGINE_NAMES = {"images": "Pillow", "mupdf": "PyMuPDF", "ffmpeg": "ffmpeg", "data": "built-in",
                 "archives": "built-in", "pandoc": "pandoc", "libreoffice": "LibreOffice",
                 "native": "native", "custom": "custom format", "ocr": "Windows OCR",
-    "picturedoc": "built-in"}
+                "picturedoc": "built-in", "tables": "built-in tables"}
 
 
 def edge_flags(src: str, dst: str, backend: Backend) -> frozenset:
@@ -208,6 +212,11 @@ def edge_flags(src: str, dst: str, backend: Backend) -> frozenset:
         f.discard("layout")
         if dst != "pdfocr":
             f.add("ocr")
+    if backend.name == "tables" and dst in ("csv", "tsv", "xlsx", "json", "ods"):
+        if src == "pdf":
+            f.add("table_layout")
+        elif sc == "image":
+            f.add("table_picture")
     if backend.name == "mupdf" and src == "pdf" and dst == "html":
         f.add("reflow")
     return frozenset(f)
