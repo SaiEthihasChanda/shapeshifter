@@ -41,7 +41,8 @@ def test_focus_highlights_neighbours(page):
     inn = {e.src.fmt for e in v.edges if e.state == "in"}
     assert {"vtt", "ass", "txt"} <= out and "vtt" in inn
     assert v.nodes["srt"].state == "focus" and v.nodes["vtt"].state in ("out", "in")
-    assert v.nodes["mp4"].state == "dim"
+    assert v.nodes["pem"].state == "dim"                     # unrelated to subtitles
+    assert v.nodes["mp4"].state in ("in", "dim")             # videos can carry subtitle tracks
     assert page.out_tree.topLevelItemCount() == len(out)
     v.select_node(None)
     assert all(e.state in ("normal", "hidden") for e in v.edges)

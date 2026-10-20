@@ -83,7 +83,7 @@ def options_for(path: str | Path, include_hidden_engine_targets: bool = False,
         opts += _learned_options(src, {o.key for o in opts})
         if _can_fill_forms(src):
             opts.append(TargetOption(key="fill", kind="fill"))
-        opts = _group_variants(path, src, opts)
+        opts = _filter_by_content(path, src, _apply_specs(path, src, _group_variants(path, src, opts)))
     if ident.details.get("sensitive"):
         # Private keys & keystores: only re-encodings of the same secret, never documents.
         opts = [o for o in opts if o.kind in ("rename", "inspect") or o.fmt in SENSITIVE_OK]
@@ -124,6 +124,47 @@ def _group_variants(path, src: str, opts: list[TargetOption]) -> list[TargetOpti
     return out
 
 
+def _filter_by_content(path, src: str, opts: list[TargetOption]) -> list[TargetOption]:
+    """Drop targets that can't work for this particular file: audio from a silent video, subtitles
+    from a video that has none."""
+    from .backends import media
+    if src not in media.VIDEO or not media.ffmpeg_path():
+        return opts
+    info = media.probe(path)
+    drop = set()
+    if not info.has_audio:
+        drop |= media.EXTRACT_TARGETS | media.AUDIO_TARGETS
+    if not info.subs:
+        drop |= media.SUBTITLE_TARGETS
+    if not info.has_video and info.has_audio:
+        drop |= media.FRAME_TARGETS | {"gif"}
+    return [o for o in opts if not (o.kind == "convert" and o.fmt in drop)]
+
+
+def _apply_specs(path, src: str, opts: list[TargetOption]) -> list[TargetOption]:
+    """Offer alternative ways of reaching a target (every frame, every sheet, first page…)."""
+    import dataclasses
+
+    from . import variants
+    out = []
+    for o in opts:
+        if o.kind != "convert" or not o.path or o.variants or not o.fmt:
+            out.append(o)
+            continue
+        last = o.path[-1]
+        specs = variants.specs_for(src, o.fmt, last.src, last.backend.name)
+        # Only ask when this file really has another way to go (several frames, sheets, pages…).
+        specs = specs[:1] + [sp for sp in specs[1:] if variants.check(sp.applies, path, src)]
+        if len(specs) < 2:
+            out.append(o)
+            continue
+        ways = tuple(dataclasses.replace(o, key=variants.variant_key(o.fmt, sp), variant_label=sp.label,
+                                         variant_note=sp.note, applies=sp.applies, variants=())
+                     for sp in specs)
+        out.append(dataclasses.replace(o, variants=ways, warnings=[]))
+    return out
+
+
 def _is_scanned_pdf(path) -> bool:
     """True if some page is only a picture (no text layer), so OCR would add something."""
     try:
@@ -161,6 +202,10 @@ def resolve_variants(paths: list, option: TargetOption, cfg: dict) -> list[Targe
     uses_ocr = [v for v in keep if any(e.backend.name == "ocr" for e in v.path)]
     if uses_ocr and not any(_has_text(p, cfg) for p in paths[:5]):
         keep = [v for v in keep if v not in uses_ocr]
+    # ways that only make sense for some files (several frames / sheets / pages, a soundtrack…)
+    from . import variants
+    fmts = {str(p): identify(p).fmt or "" for p in paths[:5]}
+    keep = [v for v in keep if not v.applies or any(variants.check(v.applies, p, f) for p, f in fmts.items())]
     return keep or [option]
 
 
@@ -278,7 +323,9 @@ def _base_name(src: Path) -> str:
     """Name without the extension being replaced. Things that don't look like an
     extension (e.g. 'report.final draft') stay part of the name."""
     base, ext = split_name(src)
-    return base if re.fullmatch(r"[a-z0-9]{1,5}", ext) else src.name
+    from .formats import CATEGORIES, NAMES
+    known = ext in NAMES or any(ext in exts for exts in CATEGORIES.values())
+    return base if known or re.fullmatch(r"[a-z0-9]{1,5}", ext) else src.name
 
 
 def convert_inplace(path: str | Path, target: str, ctx: Context,
@@ -305,7 +352,10 @@ def convert_inplace(path: str | Path, target: str, ctx: Context,
 
     if not ident.fmt:
         raise ConversionError("Couldn't work out what kind of file this is.")
+    from . import variants
+    target, variant = variants.split_target(target)
     target = target if target == "extract" else canonical(target)
+    ctx.variant = variant
     sensitive = ident.details.get("sensitive")
     if sensitive and target not in SENSITIVE_OK:
         raise RiskyFile(f"Not converted: {sensitive}; it can only be re-encoded as PEM or DER.")
@@ -377,7 +427,8 @@ def _run_path(src: Path, src_fmt: str, base: str, option: TargetOption, work: Pa
         dst = step / base if edge.dst == "extract" else step / f"{base}.{file_ext(edge.dst)}"
         sub = Context(cfg=ctx.cfg, cancel_event=ctx.cancel_event, src_fmt=edge.src,
                       dst_fmt=edge.dst, progress=lambda f, i=i: ctx.progress((i + f) / n),
-                      resource_dirs=list(dict.fromkeys([cur.parent, src.parent])))
+                      resource_dirs=list(dict.fromkeys([cur.parent, src.parent])),
+                      variant=ctx.variant if i == n - 1 else "")
         produced = _run_step(edge, cur, dst, sub)
         if not produced:
             raise ConversionError("The converter produced no output.")

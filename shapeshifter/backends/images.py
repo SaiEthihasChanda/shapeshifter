@@ -102,7 +102,39 @@ class ImageBackend(Backend):
                 if info.get("icc_profile") and tgt != "heic":
                     kwargs["icc_profile"] = info["icc_profile"]
 
-            multi = n_frames > 1 and (tgt in ANIMATED or tgt in MULTIPAGE)
+            variant = ctx.variant
+            multi = n_frames > 1 and (tgt in ANIMATED or tgt in MULTIPAGE) and variant not in ("first", "frames", "sheet")
+
+            def save_still(frame, out: Path):
+                if tgt not in KEEPS_EXIF:
+                    frame = ImageOps.exif_transpose(frame)
+                frame = _prepare(frame, tgt)
+                kw = dict(kwargs)
+                if tgt == "ico":
+                    frame = _square(frame)
+                    side = frame.size[0]
+                    kw["sizes"] = [(s, s) for s in (16, 24, 32, 48, 64, 128, 256) if s <= side] or [(side, side)]
+                frame.save(out, PIL_FORMAT[tgt], **kw)
+
+            if variant in ("frames", "sheet") and n_frames > 1:
+                loaded = []
+                for i in range(n_frames):
+                    ctx.check_cancel()
+                    im.seek(i)
+                    loaded.append(im.copy().convert("RGBA"))
+                    ctx.progress((i + 1) / n_frames * 0.7)
+                if variant == "frames":
+                    width = len(str(n_frames))
+                    outs = []
+                    for i, fr in enumerate(loaded):
+                        out = dst.with_name(f"{dst.stem}-{i + 1:0{width}d}{dst.suffix}")
+                        save_still(fr if tgt not in NO_ALPHA else fr, out)
+                        outs.append(out)
+                    ctx.progress(1.0)
+                    return outs
+                save_still(_sprite_sheet(loaded), dst)
+                ctx.progress(1.0)
+                return [dst]
             if multi:
                 frames = []
                 durations = []
@@ -120,18 +152,28 @@ class ImageBackend(Backend):
                 first.save(dst, PIL_FORMAT[tgt], save_all=True, append_images=rest, **kwargs)
             else:
                 im.seek(0)
-                frame = im.copy()
-                if tgt not in KEEPS_EXIF:
-                    frame = ImageOps.exif_transpose(frame)
-                frame = _prepare(frame, tgt)
-                if tgt == "ico":
-                    frame = _square(frame)
-                    side = frame.size[0]
-                    kwargs["sizes"] = [(s, s) for s in (16, 24, 32, 48, 64, 128, 256) if s <= side] \
-                        or [(side, side)]
-                frame.save(dst, PIL_FORMAT[tgt], **kwargs)
+                save_still(im.copy(), dst)
         ctx.progress(1.0)
         return [dst]
+
+
+def _sprite_sheet(frames):
+    """Every frame in a grid, as close to square as the frame count allows (at most 4096 px wide)."""
+    import math
+
+    from PIL import Image
+    n = len(frames)
+    cols = math.ceil(math.sqrt(n))
+    rows = math.ceil(n / cols)
+    w, h = frames[0].size
+    scale = min(1.0, 4096 / (cols * w))
+    cw, ch = max(1, round(w * scale)), max(1, round(h * scale))
+    sheet = Image.new("RGBA", (cols * cw, rows * ch), (255, 255, 255, 0))
+    for i, fr in enumerate(frames):
+        if fr.size != (cw, ch):
+            fr = fr.resize((cw, ch), Image.LANCZOS)
+        sheet.paste(fr, ((i % cols) * cw, (i // cols) * ch))
+    return sheet
 
 
 def _prepare(im, tgt: str):

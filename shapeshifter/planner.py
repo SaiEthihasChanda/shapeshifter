@@ -44,6 +44,7 @@ WARNINGS = {
     "reflow": "Reflowed — the page layout is approximated",
     "table_layout": "Tables are found from the page layout; check the columns",
     "table_picture": "Table read from a picture by OCR; check the columns and numbers",
+    "video_frame": "Saves a picture taken from the video",
     "slides_layout": "Slides are redrawn from their contents; fonts, effects and animations are simplified",
     "slides_outline": "Keeps the text, tables and pictures, not the slide layout",
     "pages_as_pictures": "Each page becomes a picture, so the text isn't editable",
@@ -87,6 +88,7 @@ class TargetOption:
     variants: tuple = ()             # different ways to reach this one target; the wheel asks which
     variant_label: str = ""          # when shown as one of those ways
     variant_note: str = ""
+    applies: str = ""               # fact about the file that makes this way worth offering (variants.check)
 
     @property
     def label(self) -> str:
@@ -221,6 +223,8 @@ def edge_flags(src: str, dst: str, backend: Backend) -> frozenset:
             f.add("table_layout")
         elif sc == "image":
             f.add("table_picture")
+    if backend.name == "ffmpeg" and sc == "video" and dst in ("png", "jpg", "webp"):
+        f.add("video_frame")
     if backend.name == "slides":
         if src in ("pptx", "odp", "ppsx", "potx"):
             f.add("slides_layout" if dst in ("pdf", "pptx", "odp") else "slides_outline")

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+from dataclasses import dataclass
 import os
 import re
 import subprocess
@@ -28,6 +29,11 @@ AUDIO_TARGETS = {"mp3", "wav", "flac", "m4a", "ogg", "opus", "aac", "wma", "aiff
 EXTRACT_TARGETS = {"mp3", "wav", "flac", "m4a", "ogg", "opus", "aac"}
 VIDEO_TARGETS = {"mp4", "mkv", "webm", "mov", "avi", "wmv"}
 CLI_ONLY_TARGETS = {"flv", "m4v", "mpg", "ts", "3gp", "ogv"}
+FRAME_TARGETS = {"png", "jpg", "webp"}               # a picture (or several) taken from a video
+SUBTITLE_TARGETS = {"srt", "vtt"}                    # subtitle tracks stored in the video
+SMALL_VF = "scale='min(1280,trunc(iw/2)*2)':-2"
+GIF_SMALL = ("fps=8,scale='min(320,iw)':-2:flags=lanczos,split[a][b];"
+             "[a]palettegen=stats_mode=diff[p];[b][p]paletteuse=dither=bayer:bayer_scale=4")
 
 EVEN = "scale=trunc(iw/2)*2:trunc(ih/2)*2"
 H264 = ["-c:v", "libx264", "-preset", "medium", "-crf", "20", "-pix_fmt", "yuv420p", "-vf", EVEN]
@@ -62,6 +68,9 @@ ENCODE = {
     "wma": ("wmav2", ["-vn", "-c:a", "wmav2", "-b:a", "192k"]),
     "aiff": ("pcm_s16be", ["-vn", "-c:a", "pcm_s16be"]),
     "ac3": ("ac3", ["-vn", "-c:a", "ac3", "-b:a", "384k"]),
+    # not run through the generic path; listed so their encoders are checked
+    "png": ("png", []), "jpg": ("mjpeg", []), "webp": ("libwebp", []),
+    "srt": ("subrip", []), "vtt": ("webvtt", []),
 }
 
 # Containers that can usually take the source streams unchanged (fast, lossless remux).
@@ -165,6 +174,61 @@ def _ffmpeg_info(src: Path) -> str:
         return ""
 
 
+@dataclass
+class MediaInfo:
+    duration: float | None = None
+    has_video: bool = False
+    has_audio: bool = False
+    subs: int = 0
+    vcodec: str = ""
+    acodec: str = ""
+    width: int = 0
+    height: int = 0
+    fps: float = 0.0
+
+
+def parse_info(text: str) -> MediaInfo:
+    """Read ffmpeg's stream summary (stderr of `ffmpeg -i`)."""
+    info = MediaInfo()
+    m = re.search(r"Duration: (\d+):(\d+):(\d+(?:\.\d+)?)", text)
+    if m:
+        info.duration = int(m.group(1)) * 3600 + int(m.group(2)) * 60 + float(m.group(3))
+    for line in text.splitlines():
+        m = re.search(r"Stream #\d+:\d+.*?: (Video|Audio|Subtitle): ([\w\-]+)(.*)", line)
+        if not m:
+            continue
+        kind, codec, rest = m.groups()
+        if kind == "Video" and "attached pic" not in line:
+            if not info.has_video:
+                info.has_video, info.vcodec = True, codec
+                dims = re.search(r"(\d{2,5})x(\d{2,5})", rest)
+                if dims:
+                    info.width, info.height = int(dims.group(1)), int(dims.group(2))
+                fps = re.search(r"([\d.]+) fps", rest)
+                info.fps = float(fps.group(1)) if fps else 0.0
+        elif kind == "Audio":
+            if not info.has_audio:
+                info.has_audio, info.acodec = True, codec
+        elif kind == "Subtitle":
+            info.subs += 1
+    return info
+
+
+@lru_cache(maxsize=32)
+def _probe_cached(path: str, mtime: int, size: int) -> MediaInfo:
+    return parse_info(_ffmpeg_info(Path(path)))
+
+
+def probe(src) -> MediaInfo:
+    """Streams and duration of a media file (cached per file version)."""
+    p = Path(src)
+    try:
+        st = p.stat()
+        return _probe_cached(str(p.resolve()), st.st_mtime_ns, st.st_size)
+    except OSError:
+        return MediaInfo()
+
+
 def probe_format(src: Path) -> str:
     """Container name(s) as ffprobe reports them, e.g. 'matroska,webm' ('' if unknown)."""
     fp = ffprobe_path()
@@ -209,7 +273,7 @@ class MediaBackend(Backend):
 
     def targets(self, src):
         if src in VIDEO:
-            t = VIDEO_TARGETS | {"gif"} | EXTRACT_TARGETS
+            t = VIDEO_TARGETS | {"gif"} | EXTRACT_TARGETS | FRAME_TARGETS | SUBTITLE_TARGETS
         elif src == "gif":
             t = {"mp4", "webm", "mov", "mkv"}
         elif src in AUDIO:
@@ -229,26 +293,48 @@ class MediaBackend(Backend):
         return set()
 
     def cost(self, src, dst):
+        if dst in FRAME_TARGETS | SUBTITLE_TARGETS:
+            return 2.0
         if src in VIDEO and dst in REMUX:
             return 2.0   # usually a fast lossless remux
         return 4.0 if dst in VIDEO or dst == "gif" or src == "gif" else 2.0
 
     def terminal(self, src, dst):
         # GIF <-> video conversions have no soundtrack; chaining further makes no sense.
-        return dst == "gif" or src == "gif"
+        return dst == "gif" or src == "gif" or dst in FRAME_TARGETS
 
     def first_step_only(self, src, dst):
         return src == "gif"   # a still image turned into a GIF isn't a video
 
     def convert(self, src: Path, dst: Path, ctx: Context) -> list[Path]:
-        tgt = target_ext(dst)
-        src_ext = target_ext(src)
+        tgt = ctx.dst_fmt or target_ext(dst)
+        src_ext = ctx.src_fmt or target_ext(src)
         duration = probe_duration(src)
+        v = ctx.variant
+        if tgt in FRAME_TARGETS and src_ext in VIDEO:
+            return self._frames(src, dst, ctx, v, duration or 0.0)
+        if tgt in SUBTITLE_TARGETS and src_ext in VIDEO:
+            return self._subtitles(src, dst, ctx, tgt)
 
         attempts = []
-        if tgt in REMUX and src_ext in VIDEO:
-            attempts.append(REMUX[tgt])
-        attempts.append(ENCODE[tgt][1])
+        pre: list[str] = []
+        if tgt == "gif":
+            enc = list(ENCODE["gif"][1])
+            if v == "small":
+                enc[enc.index(GIF_FILTER)] = GIF_SMALL
+            elif v == "short":
+                enc = ["-t", "10"] + enc
+            attempts.append(enc)
+        elif v == "small" and tgt in VIDEO_TARGETS | CLI_ONLY_TARGETS:
+            attempts.append(_smaller(ENCODE[tgt][1]))
+        elif v == "mute" and tgt in VIDEO_TARGETS | CLI_ONLY_TARGETS:
+            if tgt in REMUX and src_ext in VIDEO:
+                attempts.append(REMUX[tgt] + ["-an"])
+            attempts.append(ENCODE[tgt][1] + ["-an"])
+        else:
+            if tgt in REMUX and src_ext in VIDEO:
+                attempts.append(REMUX[tgt])
+            attempts.append(ENCODE[tgt][1])
 
         error = ""
         for args in attempts:
@@ -260,8 +346,42 @@ class MediaBackend(Backend):
             log.info("ffmpeg attempt failed (%s): %s", args[:4], error[-500:])
         raise ConversionError(_summarize(error))
 
-    def _run(self, src, dst, args, duration, ctx: Context):
-        cmd = [ffmpeg_path(), "-y", "-hide_banner", "-nostdin", "-i", str(src), *args,
+    def _frames(self, src: Path, dst: Path, ctx: Context, variant: str, duration: float) -> list[Path]:
+        """Pictures from a video: the middle frame, the first, one every few seconds, or a contact sheet."""
+        tgt = target_ext(dst)
+        q = {"jpg": ["-q:v", "2"], "webp": ["-quality", "90"]}.get(tgt, [])
+        if variant == "every":
+            step = max(1.0, round(duration / 30)) if duration else 5.0
+            out = dst.with_name(f"{dst.stem}-%03d{dst.suffix}")
+            rc, err = self._run(src, out, ["-vf", f"fps=1/{step:g}", *q], duration, ctx)
+            files = sorted(dst.parent.glob(f"{dst.stem}-*{dst.suffix}"))
+            if rc != 0 or not files:
+                raise ConversionError(_summarize(err))
+            ctx.progress(1.0)
+            return files
+        if variant == "sheet":
+            step = max(0.5, duration / 20) if duration else 2.0
+            rc, err = self._run(src, dst, ["-vf", f"fps=1/{step:g},scale=320:-2,tile=5x4", "-frames:v", "1", *q], duration, ctx)
+        elif variant == "first":
+            rc, err = self._run(src, dst, ["-frames:v", "1", *q], duration, ctx)
+        else:
+            rc, err = self._run(src, dst, ["-frames:v", "1", *q], duration, ctx,
+                                pre=["-ss", f"{max(0.0, duration / 2):.2f}"] if duration else [])
+        if rc != 0 or not dst.exists() or dst.stat().st_size == 0:
+            raise ConversionError(_summarize(err))
+        ctx.progress(1.0)
+        return [dst]
+
+    def _subtitles(self, src: Path, dst: Path, ctx: Context, tgt: str) -> list[Path]:
+        codec = {"srt": "srt", "vtt": "webvtt"}[tgt]
+        rc, err = self._run(src, dst, ["-map", "0:s:0", "-c:s", codec], None, ctx)
+        if rc != 0 or not dst.exists() or dst.stat().st_size == 0:
+            raise ConversionError("This video has no subtitle track that can be extracted.")
+        ctx.progress(1.0)
+        return [dst]
+
+    def _run(self, src, dst, args, duration, ctx: Context, pre=()):
+        cmd = [ffmpeg_path(), "-y", "-hide_banner", "-nostdin", *pre, "-i", str(src), *args,
                "-progress", "pipe:1", "-nostats", str(dst)]
         with tempfile.TemporaryFile() as errf:
             proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=errf, stdin=subprocess.DEVNULL,
@@ -289,6 +409,23 @@ class MediaBackend(Backend):
             errf.seek(0)
             err = errf.read().decode("utf-8", "replace")
         return proc.returncode, err
+
+
+def _smaller(args: list[str]) -> list[str]:
+    """The target's usual output arguments, at a lower quality and at most 1280 px wide."""
+    out = list(args)
+    for flag, value in (("-crf", None), ("-b:a", "96k"), ("-vf", SMALL_VF), ("-q:v", "6")):
+        if flag in out:
+            i = out.index(flag)
+            if flag == "-crf":
+                out[i + 1] = str(min(40, int(out[i + 1]) + 8))
+            elif flag in ("-b:a", "-vf"):
+                out[i + 1] = value
+            elif flag == "-q:v":
+                out[i + 1] = value
+    if "-vf" not in out:
+        out += ["-vf", SMALL_VF]
+    return out
 
 
 def _summarize(stderr: str) -> str:

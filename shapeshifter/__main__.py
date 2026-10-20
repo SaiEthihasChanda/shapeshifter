@@ -86,7 +86,9 @@ def cmd_convert(paths: list[str], target: str, original: str | None) -> int:
     cfg = config.load()
     if original:
         cfg["original"] = original
-    target = target if ":" in target or target == "extract" else canonical(target)
+    if ":" not in target and target != "extract":
+        base, _, variant = target.partition("#")                 # e.g. png#frames
+        target = canonical(base) + (f"#{variant}" if variant else "")
     failures = 0
     for p in _abs(paths):
         try:

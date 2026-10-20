@@ -36,6 +36,8 @@ class Context:
     # Folders to look in for files a document refers to (images, stylesheets): the folder
     # of the file being converted first, then the folder of the user's original file.
     resource_dirs: list = field(default_factory=list)
+    # Which way to do the last step when a target can be reached in several (see variants.py).
+    variant: str = ""
 
     def check_cancel(self) -> None:
         if self.cancel_event.is_set():

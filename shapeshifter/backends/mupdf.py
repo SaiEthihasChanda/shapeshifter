@@ -298,6 +298,35 @@ class MuPDFBackend(Backend):
 
     # ------------------------------------------------------------- raster output
 
+    def _tall(self, doc, dst: Path, tgt: str, zoom: float, ctx: Context) -> list[Path]:
+        """Every page stacked top to bottom in one image."""
+        import pymupdf as fitz
+        from PIL import Image
+
+        from .images import _prepare
+        pages = []
+        for i, page in enumerate(doc):
+            ctx.check_cancel()
+            pix = page.get_pixmap(matrix=fitz.Matrix(zoom, zoom), alpha=False)
+            pages.append(Image.frombytes("RGB", (pix.width, pix.height), pix.samples))
+            ctx.progress((i + 1) / doc.page_count * 0.8)
+        width = max(p.width for p in pages)
+        gap = max(4, width // 120)
+        height = sum(p.height for p in pages) + gap * (len(pages) - 1)
+        scale = min(1.0, 30000 / height)                      # keep the image a sane size
+        canvas = Image.new("RGB", (round(width * scale), round(height * scale)), (200, 200, 200))
+        y = 0.0
+        for p in pages:
+            if scale != 1.0:
+                p = p.resize((max(1, round(p.width * scale)), max(1, round(p.height * scale))), Image.LANCZOS)
+            canvas.paste(p, (0, round(y)))
+            y += p.height + gap * scale
+        fmt = {"png": "PNG", "jpg": "JPEG", "webp": "WEBP"}[tgt]
+        kw = {"quality": ctx.cfg["jpeg_quality"]} if tgt == "jpg" else {"quality": ctx.cfg["webp_quality"]} if tgt == "webp" else {}
+        _prepare(canvas, tgt).save(dst, fmt, **kw)
+        ctx.progress(1.0)
+        return [dst]
+
     def _render(self, doc, src: Path, dst: Path, tgt: str, ctx: Context) -> list[Path]:
         import pymupdf as fitz
         from PIL import Image
@@ -311,6 +340,12 @@ class MuPDFBackend(Backend):
         n = doc.page_count
         images = []
         outputs = []
+        if ctx.variant == "tall" and tgt in ("png", "jpg", "webp") and n > 1:
+            return self._tall(doc, dst, tgt, zoom, ctx)
+        if ctx.variant == "first" and n > 1:
+            n_first = doc.page_count
+            doc.select([0])                                   # render only the first page
+            n = 1
         for i, page in enumerate(doc):
             ctx.check_cancel()
             pix = page.get_pixmap(matrix=fitz.Matrix(zoom, zoom), alpha=alpha)

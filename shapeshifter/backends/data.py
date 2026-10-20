@@ -48,6 +48,15 @@ class DataBackend(Backend):
         try:
             if s in TABLE:
                 sheets = _read_table(src, s)
+                if ctx.variant == "sheets" and t in ("csv", "tsv") and len(sheets) > 1:
+                    outs = []
+                    for name, rows in sheets.items():
+                        safe = re.sub(r'[<>:"/\\|?*\x00-\x1f]', "_", str(name)).strip() or "Sheet"
+                        out = dst.with_name(f"{dst.stem} - {safe}{dst.suffix}")
+                        _write_table(out, t, {name: rows})
+                        outs.append(out)
+                    ctx.progress(1.0)
+                    return outs
                 if t in TABLE:
                     _write_table(dst, t, sheets)
                 else:
