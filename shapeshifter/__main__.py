@@ -17,7 +17,7 @@ import logging
 import os
 import sys
 
-CLI_COMMANDS = {"convert", "combine", "targets", "identify", "fill", "install", "uninstall", "register", "selftest",
+CLI_COMMANDS = {"convert", "combine", "targets", "identify", "fill", "meta", "install", "uninstall", "register", "selftest",
                 "-h", "--help", "--version"}
 
 
@@ -114,6 +114,38 @@ def cmd_combine(paths: list[str], target: str) -> int:
         return 1
     print(f"{len(paths)} files -> {res.outputs[0].name} (originals kept)")
     return 0
+
+
+def cmd_meta(args) -> int:
+    from . import config, metadata
+    from .identify import identify
+    cfg = config.load()
+    if args.gui:
+        from PySide6.QtWidgets import QApplication
+        from .metadata_dialog import show_metadata_editor
+        app = QApplication.instance() or QApplication(sys.argv)
+        show_metadata_editor(args.files, cfg)
+        return app.exec()
+    status = 0
+    for f in args.files:
+        fmt = identify(f).fmt or ""
+        if not metadata.supports(fmt):
+            print(f"{f}: can't edit the properties of this kind of file", file=sys.stderr)
+            status = 1
+            continue
+        fields = metadata.read(f, fmt)
+        if not (args.set or args.strip or args.no_location):
+            print(f)
+            for fld in fields:
+                if fld.value:
+                    print(f"  {fld.label:<24}{fld.value}")
+            continue
+        changes = metadata.parse_assignments(args.set or [], fields)
+        if args.no_location:
+            changes["gps"] = ""
+        out = metadata.apply(f, fmt, changes, args.strip, cfg)
+        print(f"Saved {out}")
+    return status
 
 
 def cmd_targets(path: str) -> int:
@@ -425,6 +457,12 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--style", default="Typed", choices=["Typed", "Handwriting", "Typewriter"])
     p.add_argument("--ink", default="Blue", choices=["Blue", "Black", "Red"])
     p.add_argument("--gui", action="store_true", help="open the fill window")
+    p = sub.add_parser("meta", help="show or edit a file's properties (EXIF, author, title, tags, dates)")
+    p.add_argument("files", nargs="+")
+    p.add_argument("--set", action="append", metavar="NAME=VALUE", help="new value (empty to remove), e.g. Author=Ada")
+    p.add_argument("--strip", action="store_true", help="remove all personal details")
+    p.add_argument("--no-location", action="store_true", help="remove only the GPS location")
+    p.add_argument("--gui", action="store_true", help="open the properties window")
     sub.add_parser("daemon", help="tray icon + global hotkeys")
     sub.add_parser("settings", help="open the settings app")
     p = sub.add_parser("install", help="register context menu, shortcuts, autostart")
@@ -451,6 +489,8 @@ def main(argv: list[str] | None = None) -> int:
             return cmd_identify(args.file)
         if args.cmd == "fill":
             return cmd_fill(args)
+        if args.cmd == "meta":
+            return cmd_meta(args)
         if args.cmd == "settings":
             return cmd_settings()
         if args.cmd == "daemon":

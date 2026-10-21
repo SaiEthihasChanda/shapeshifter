@@ -228,6 +228,9 @@ and **ROTATE**, **TIDY** for JSON and XML (pretty / minify / sorted), **FIX TEXT
 **SMALLER**, and video **SMALLER** and **NO SOUND**. The result is a new file such as `photo (smaller).jpg` and the original follows
 your usual setting (Recycle Bin by default).
 
+## Properties (metadata)
+Choose **PROPERTIES** on the wheel to see and change what is stored inside a file: EXIF in pictures (author, copyright, description, date taken, camera, GPS location), title / author / subject / keywords in PDF, Word, Excel, PowerPoint and OpenDocument files, tags in audio and video, and the file's created / modified dates. JPEG and PNG pictures are edited without recompressing, so there is no quality loss; other picture types are saved again. Tick *Remove all personal details* to strip everything, or select several files to set the same author on all of them. From the command line: `shapeshifter meta photo.jpg --set Author=Ada --no-location`.
+
 ## Older and other files
 
 | Kind | What you get |

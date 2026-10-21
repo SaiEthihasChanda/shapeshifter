@@ -108,6 +108,8 @@ class TargetOption:
             return "EXTRACT"
         if self.kind == "inspect":
             return "INSPECT"
+        if self.kind == "meta":
+            return "PROPERTIES"
         if self.kind == "fill":
             return "FILL FORM"
         if self.kind == "combine":
@@ -124,6 +126,8 @@ class TargetOption:
             return "Unpack here"
         if self.kind == "inspect":
             return "What is it?"
+        if self.kind == "meta":
+            return "Edit details"
         if self.kind == "combine":
             return "Combine"
         if self.kind == "action":
@@ -150,7 +154,7 @@ class TargetOption:
 
     @property
     def category(self) -> str:
-        if self.kind in ("rename", "inspect", "action"):
+        if self.kind in ("rename", "inspect", "action", "meta"):
             return "tool"
         if self.kind == "extract":
             return "archive"
@@ -179,6 +183,9 @@ class TargetOption:
             return f"Rename to .{file_ext(self.fmt)} — the contents are {name_of(self.fmt)}"
         if self.kind == "inspect":
             return "Show what the file contains"
+        if self.kind == "meta":
+            return ("Shows the details stored in the file (author, title, dates, camera, location, tags) and lets you "
+                    "change or remove them. The content itself is not touched.")
         if self.kind == "assume":
             return f"Not sure what this is — treat it as {name_of(self.fmt)}, then pick a format"
         if self.kind == "extract":
@@ -402,7 +409,7 @@ def ordered(options: list[TargetOption], src_fmt: str | None) -> list[TargetOpti
                                                 "subtitle", "model", "font", "security", "archive")
                                     if c != src_cat]
     order = {c: i for i, c in enumerate(cats)}
-    kind_order = {"assume": 0, "rename": 0, "combine": 0, "convert": 1, "fill": 1, "extract": 2, "action": 2, "inspect": 3}
+    kind_order = {"assume": 0, "rename": 0, "combine": 0, "convert": 1, "fill": 1, "extract": 2, "action": 2, "meta": 2, "inspect": 3}
 
     def key(o: TargetOption):
         if o.kind == "assume":

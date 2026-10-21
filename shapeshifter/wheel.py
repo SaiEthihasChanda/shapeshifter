@@ -293,6 +293,8 @@ class WheelView(QWidget):
             return ["extract", "unpack"]
         if opt.kind == "inspect":
             return ["inspect", "info"]
+        if opt.kind == "meta":
+            return ["properties", "metadata", "exif", "author", "tags", "details", "edit", "location", "gps", "title", "artist"]
         if opt.kind == "fill":
             return ["fill", "form", "write", "type", "sign", "signature", "checkbox", "inferred"]
         if opt.kind == "combine":
@@ -563,7 +565,7 @@ class WheelView(QWidget):
             elif self.hover >= 0:
                 opt = self.options[self.hover]
                 top = {"rename": "rename to", "extract": "archive", "inspect": "show",
-                       "assume": "treat as", "fill": "inferred", "combine": "combine all", "action": "same format"}.get(opt.kind, f"{src_label}  →")
+                       "assume": "treat as", "fill": "inferred", "combine": "combine all", "action": "same format", "meta": "details"}.get(opt.kind, f"{src_label}  →")
                 label = opt.label
                 self._center_text(p, box, top, 11 * ls, dim, dy=-18)
                 self._center_text(p, box, label, (24 if len(label) <= 5 else 17) * ls, text,
@@ -933,6 +935,11 @@ class WheelOverlay(WheelView):
             from .inspector import show_inspector
             for p in self.paths[:5]:
                 show_inspector(p)
+            self.dismiss()
+            return
+        if target == "meta":
+            from .metadata_dialog import show_metadata_editor
+            show_metadata_editor(list(self.paths), self.cfg)
             self.dismiss()
             return
         if target == "fill":

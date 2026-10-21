@@ -1,5 +1,8 @@
 # Changelog
 
+## 2.6.0
+- **Properties**: view and edit a file's metadata from the wheel (or `shapeshifter meta`). Pictures (EXIF: author, copyright, description, date taken, camera, GPS location; JPEG and PNG are edited without recompressing), PDF, Word / Excel / PowerPoint / OpenDocument (title, author, subject, keywords, company, dates), audio and video tags (title, artist, album, year, track …), and the file's own created / modified dates. Remove location only, remove everything, or edit many files at once.
+
 ## 2.5.0
 - **Tables** in both directions between documents and data: PDF, Word, ODT, HTML, Markdown, slides and pictures ↔ CSV / TSV / Excel / ODS / JSON, and spreadsheets → HTML / Markdown / Word / PDF.
 - **Presentations**: PPTX / ODP read, drawn to PDF, turned into outlines, converted to each other; PDFs, pictures and documents → slides.

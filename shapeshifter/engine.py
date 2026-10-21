@@ -85,6 +85,9 @@ def options_for(path: str | Path, include_hidden_engine_targets: bool = False,
             opts.append(TargetOption(key="fill", kind="fill"))
         from . import actions
         opts += actions.options_for(Path(path), src)
+        from . import metadata
+        if metadata.supports(src):
+            opts.append(TargetOption(key="meta", kind="meta"))
         opts = _filter_by_content(path, src, _apply_specs(path, src, _group_variants(path, src, opts)))
     if ident.details.get("sensitive"):
         # Private keys & keystores: only re-encodings of the same secret, never documents.
