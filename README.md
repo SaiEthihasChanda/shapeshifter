@@ -358,3 +358,9 @@ Design notes: `docs/PLAN-universal-conversion.md`. Logs: `%LOCALAPPDATA%\ShapeSh
 
 ShapeShifter is free software under the **GNU AGPL v3 or later** (see [LICENSE](LICENSE)); bundled third-party
 components are listed in [THIRD-PARTY-NOTICES.md](THIRD-PARTY-NOTICES.md). Maintainer notes: [docs/RELEASING.md](docs/RELEASING.md).
+
+## Code signing policy
+
+The Windows installer is not code-signed yet, so SmartScreen may warn on first run. The plan, and what the free
+[SignPath Foundation](https://signpath.org) programme would provide once approved, is in
+[docs/CODE-SIGNING.md](docs/CODE-SIGNING.md), together with the privacy policy: ShapeShifter collects and sends no data.

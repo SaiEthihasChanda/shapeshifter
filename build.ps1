@@ -21,7 +21,7 @@
     e.g. 'signtool sign /fd sha256 /tr http://timestamp.digicert.com /td sha256 /a $f').
     Untested: no certificate was available when this was written.
 #>
-param([switch]$NoFFmpeg, [string]$FFmpeg, [switch]$SkipTests, [switch]$NoInno,
+param([switch]$NoFFmpeg, [string]$FFmpeg, [switch]$SkipTests, [switch]$NoInno, [string]$PythonExe,
       [switch]$Sign, [string]$SignCommand = $env:SHAPESHIFTER_SIGN)
 
 $ErrorActionPreference = 'Continue'
@@ -35,12 +35,13 @@ function Fail($m) { Write-Host $m -ForegroundColor Red; exit 1 }
 Step 'Finding a standard Python (not Anaconda / Store)'
 $check = "import os,sys; sys.exit(0 if sys.version_info >= (3,10) and not os.path.exists(os.path.join(sys.base_prefix,'conda-meta')) else 1)"
 $Python = $null
+if ($PythonExe) { $Python = $PythonExe }       # CI passes its own interpreter
 $candidates = @()
 if (Get-Command py -ErrorAction SilentlyContinue) {
     $candidates += (& py -0p 2>$null) | ForEach-Object { if ($_ -match '([A-Za-z]:\\.+python\.exe)') { $Matches[1].Trim() } }
 }
 $candidates += Get-ChildItem "$env:LOCALAPPDATA\Programs\Python\Python3*\python.exe" -ErrorAction SilentlyContinue | ForEach-Object FullName
-foreach ($c in $candidates | Select-Object -Unique) {
+foreach ($c in $(if ($PythonExe) { @() } else { $candidates | Select-Object -Unique })) {
     if ($c -match 'WindowsApps') { continue }
     & $c -c $check 2>$null | Out-Null
     if ($LASTEXITCODE -eq 0) { $Python = $c; break }
