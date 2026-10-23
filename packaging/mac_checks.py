@@ -217,8 +217,15 @@ end tell''')
         time.sleep(1.5)
         print("      after Escape:", screenshot(shots, "4b-after-escape"))
         text = log.read_text(encoding="utf-8", errors="replace")[start:]
+        how = "a posted key event"
+        if "Wheel dismissed" not in text:                     # try the way System Events types keys
+            r = osascript('tell application "System Events" to key code 53')
+            time.sleep(1.5)
+            text = log.read_text(encoding="utf-8", errors="replace")[start:]
+            how = f"System Events (posted event didn't arrive; osascript exit {r.returncode} {r.stderr.strip()[:80]})"
         if "Wheel dismissed" not in text:
             raise RuntimeError("Escape didn't close the wheel; log:\n" + text[-2500:])
+        print(f"      Escape closed the wheel, sent with {how}")
         osascript('tell application "Finder" to activate')
         time.sleep(1)
         b = osascript('tell application "Finder" to get bounds of front window').stdout.strip()
