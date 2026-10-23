@@ -10,7 +10,6 @@ from __future__ import annotations
 
 import logging
 import math
-import sys
 import threading
 import time
 from pathlib import Path
@@ -854,8 +853,6 @@ class WheelOverlay(WheelView):
 
     def keyPressEvent(self, e):
         k = e.key()
-        if sys.platform == "darwin":
-            log.info("Wheel key %s (state %s, search %r)", k, self.state, self.query)
         if k == Qt.Key.Key_Escape:
             if self.state == "busy" and self.worker:
                 self.worker.cancel_event.set()
