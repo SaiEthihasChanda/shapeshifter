@@ -655,7 +655,7 @@ class HotkeyDialog(QDialog):
 
     def _validate(self, *_):
         self.target.setEnabled(self.action.currentData() == "convert")
-        from .mousehook import is_mouse_spec, parse_mouse_spec
+        from .triggers import is_mouse_spec, parse_mouse_spec
         spec = self.keys.spec
         ok = bool(spec)
         if not spec:

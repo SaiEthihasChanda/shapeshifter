@@ -142,6 +142,8 @@ class EventTap:
         if self._loop is not None:
             import Quartz
             Quartz.CFRunLoopStop(self._loop)
+        if self._thread is not None and self._thread.is_alive():
+            self._thread.join(2)
 
     def _run(self, ready: threading.Event):
         import Quartz
@@ -149,7 +151,7 @@ class EventTap:
         for t in (Quartz.kCGEventKeyDown, Quartz.kCGEventLeftMouseDown, Quartz.kCGEventLeftMouseUp,
                   Quartz.kCGEventRightMouseDown, Quartz.kCGEventRightMouseUp, Quartz.kCGEventOtherMouseDown,
                   Quartz.kCGEventOtherMouseUp, Quartz.kCGEventScrollWheel):
-            mask |= Quartz.CGEventMaskBit(t)
+            mask |= 1 << int(t)                      # CGEventMaskBit
         self._tap = Quartz.CGEventTapCreate(Quartz.kCGSessionEventTap, Quartz.kCGHeadInsertEventTap,
                                             Quartz.kCGEventTapOptionDefault, mask, self._callback, None)
         if not self._tap:

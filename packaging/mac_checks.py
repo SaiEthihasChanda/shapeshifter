@@ -115,13 +115,11 @@ def check_quick_action(tmp: Path):
         plistlib.dump(integration._workflow_plist(f'for f in "$@"; do echo "$f" >> "{out}"; done'), f)
     with open(wf / "Info.plist", "wb") as f:
         plistlib.dump(integration._workflow_info(), f)
-    files = [tmp / "qa 1.jpg", tmp / "qa-2.pdf"]
+    files = [tmp / "picked file 1.jpg"]                     # automator -i takes one item
     for p in files:
         p.write_bytes(b"x")
-    args = ["automator"]
-    for p in files:
-        args += ["-i", str(p)]
-    r = subprocess.run(args + [str(wf.parent)], capture_output=True, text=True, timeout=120)
+    r = subprocess.run(["automator", "-i", str(files[0]), str(wf.parent)], capture_output=True, text=True,
+                       timeout=120)
     if not out.exists():
         raise RuntimeError(f"the workflow didn't run its shell step (exit {r.returncode}): {r.stderr.strip()[:300]}")
     lines = out.read_text().splitlines()
@@ -132,7 +130,7 @@ def check_quick_action(tmp: Path):
     dump = subprocess.run(["/System/Library/CoreServices/pbs", "-dump_pboard"], capture_output=True, text=True,
                           timeout=60).stdout
     listed = integration.SERVICE_NAME in dump
-    return (f"Automator ran it with {len(lines)} files (names with spaces kept); installed at {integration.WORKFLOW}"
+    return (f"Automator ran it with {lines!r} (a name with spaces arrives whole); installed at {integration.WORKFLOW}"
             f" ({n} formats); listed by pbs: {listed}")
 
 
@@ -178,6 +176,11 @@ def check_app(app: Path, shots: Path, tmp: Path):
     from shapeshifter.mac import BUNDLE_ID
     log = config.LOG_FILE
     start = log.stat().st_size if log.exists() else 0
+    # No hotkeys for this run: the CI machine can't grant the app Accessibility, and the system's prompt would
+    # take the focus away from the wheel (which closes when it loses the focus, as it should).
+    cfg = config.load()
+    cfg["hotkeys"] = []
+    config.save(cfg)
     subprocess.run(["/System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/"
                     "lsregister", "-f", str(app)], capture_output=True, timeout=60)
     subprocess.run(["open", str(app)], check=True, timeout=60)
@@ -187,8 +190,10 @@ def check_app(app: Path, shots: Path, tmp: Path):
     from PIL import Image
     Image.new("RGB", (64, 48), (200, 60, 60)).save(pic)
     subprocess.run(["open", "-b", BUNDLE_ID, str(pic)], check=True, timeout=60)
-    time.sleep(6)
+    time.sleep(2)
     print("      wheel:", screenshot(shots, "2-wheel-after-quick-action"))
+    time.sleep(4)
+    print("      later:", screenshot(shots, "3-six-seconds-later"))
     text = log.read_text(encoding="utf-8", errors="replace")[start:] if log.exists() else ""
     running = subprocess.run(["pgrep", "-f", "ShapeShifter.app/Contents/MacOS/ShapeShifter"], capture_output=True,
                              text=True).stdout.split()
@@ -199,8 +204,12 @@ def check_app(app: Path, shots: Path, tmp: Path):
         raise RuntimeError("the app wasn't running after it was opened; log:\n" + text[-2000:])
     if f"Finder handed over {pic}" not in text:
         raise RuntimeError("the app didn't receive the file; log:\n" + text[-2000:])
+    if "Showing the wheel for 1 file(s)" not in text:
+        raise RuntimeError("the wheel wasn't shown; log:\n" + text[-2000:])
     services = Path.home() / "Library" / "Services" / "Convert with ShapeShifter.workflow"
-    return f"the app received the file; first run installed the Quick Action: {services.exists()}"
+    closed = "Wheel closed: another window took the focus" in text
+    return (f"the app received the file and showed the wheel{' (then lost the focus)' if closed else ''}; "
+            f"first run installed the Quick Action: {services.exists()}")
 
 
 def main() -> int:

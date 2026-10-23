@@ -881,6 +881,7 @@ class WheelOverlay(WheelView):
                 self._was_active = True
             elif (self._was_active and self.state == "choose"
                   and self.cfg.get("close_on_focus_loss", True)):
+                log.info("Wheel closed: another window took the focus")
                 self.dismiss()   # user clicked/alt-tabbed elsewhere
 
     # ------------------------------------------------------------- conversion

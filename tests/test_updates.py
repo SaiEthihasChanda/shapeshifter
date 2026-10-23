@@ -8,7 +8,7 @@ from shapeshifter import config, updates
 
 def release(tag="v9.0.0", **extra):
     data = {"tag_name": tag, "body": "Notes", "html_url": "https://github.com/x/y/releases/tag/" + tag, "draft": False, "prerelease": False,
-            "assets": [{"name": "ShapeShifter-Setup.exe", "size": 5, "browser_download_url": "https://github.com/x/y/releases/download/a/ShapeShifter-Setup.exe",
+            "assets": [{"name": updates.ASSET, "size": 5, "browser_download_url": "https://github.com/x/y/releases/download/a/" + updates.ASSET,
                         "digest": "sha256:" + hashlib.sha256(b"hello").hexdigest()}]}
     data.update(extra)
     return data

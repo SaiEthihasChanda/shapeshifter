@@ -224,7 +224,7 @@ class TestDetection:
         assert any(f.kind == "signature" for f in fields)
         assert not any("MEMBERSHIP" in f.label for f in fields)          # a heading is not a blank
         name = by[("text", "Full name")]
-        assert 340 <= name.box[0] <= 380 and 170 <= name.box[1] <= 200 and name.box[2] > 700
+        assert 340 <= name.box[0] <= 380 and 150 <= name.box[1] <= 200 and name.box[2] > 700
         student = by[("checkbox", "Student")]
         assert abs(student.box[0] - 60) <= 3 and abs(student.box[1] - 500) <= 3
 

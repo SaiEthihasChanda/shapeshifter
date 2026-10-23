@@ -81,5 +81,19 @@ def recognize_path(path, lang: str = "auto"):
             words.append(Word(m.group(), x, y, r.size.width * W, r.size.height * H))
         if words:
             lines.append(Line(text, words))
-    lines.sort(key=lambda ln: (round(ln.box[1] / max(1.0, ln.box[3] * 0.6)), ln.box[0]))
-    return Page(W, H, lines)
+    return Page(W, H, reading_order(lines))
+
+
+def reading_order(lines: list) -> list:
+    """Top to bottom; lines side by side on one row (their middles within half a line of each other) left to right."""
+    lines = sorted(lines, key=lambda ln: ln.box[1] + ln.box[3] / 2)
+    rows: list[list] = []
+    for ln in lines:
+        mid = ln.box[1] + ln.box[3] / 2
+        if rows:
+            ref = rows[-1][0]
+            if abs(mid - (ref.box[1] + ref.box[3] / 2)) < 0.5 * min(ln.box[3], ref.box[3]):
+                rows[-1].append(ln)
+                continue
+        rows.append([ln])
+    return [ln for row in rows for ln in sorted(row, key=lambda ln: ln.box[0])]

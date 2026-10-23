@@ -66,7 +66,7 @@ def _to_iso_date(text: str) -> str:
 def _file_fields(path: Path) -> list[Field]:
     st = path.stat()
     local = lambda ts: datetime.fromtimestamp(ts).strftime(DATE_FMT)       # noqa: E731
-    return [Field("file_created", "Created", local(st.st_ctime), "File", True, "The file's own creation date"),
+    return [Field("file_created", "Created", local(getattr(st, "st_birthtime", st.st_ctime)), "File", True, "The file's own creation date"),
             Field("file_modified", "Modified", local(st.st_mtime), "File", True, "The file's own last-modified date"),
             Field("file_size", "Size", f"{st.st_size:,} bytes", "File", False),
             Field("file_path", "Location", str(path.parent), "File", False)]

@@ -61,6 +61,14 @@ jobs:
           python packaging/mac_checks.py --app /Applications/ShapeShifter.app --shots mac-shots
           cp ~/Library/Application\ Support/ShapeShifter/Data/shapeshifter.log mac-shots/ 2>/dev/null || true
 
+      - name: Crash reports
+        if: always()
+        run: |
+          mkdir -p mac-shots/crashes
+          find ~/Library/Logs/DiagnosticReports /Library/Logs/DiagnosticReports -newer pyproject.toml \
+               \( -iname "*python*" -o -iname "*shapeshifter*" \) -exec cp {} mac-shots/crashes/ \; 2>/dev/null || true
+          ls -la mac-shots/crashes
+
       - uses: actions/upload-artifact@v4
         if: always()
         with:

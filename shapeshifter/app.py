@@ -172,6 +172,7 @@ class Controller(QObject):
             self._maybe_quit()
             return
         from .wheel import WheelOverlay
+        log.info("Showing the wheel for %d file(s)", len(paths))
         self.cfg = config.load()
         self.wheel = WheelOverlay(paths, self.cfg, auto_target=target)
         self.wheel.closed.connect(self._on_wheel_closed)
