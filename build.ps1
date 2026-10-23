@@ -167,7 +167,7 @@ Sign-File $out
 # ------------------------------------------------------- release extras
 Step 'Checksums and source archive'
 $srcZip = Join-Path $Dist "shapeshifter-$Version-source.zip"
-& $VPy -I -c "import zipfile, pathlib, sys; root = pathlib.Path(sys.argv[1]); skip = {'.build','dist','.git','__pycache__','.pytest_cache','.venv','.claude','graphify-out'}; z = zipfile.ZipFile(sys.argv[2], 'w', zipfile.ZIP_DEFLATED); [z.write(p, 'shapeshifter-' + sys.argv[3] + '/' + p.relative_to(root).as_posix()) for p in sorted(root.rglob('*')) if p.is_file() and not (set(p.relative_to(root).parts) & skip) and p.suffix != '.pyc']; z.close()" $Root $srcZip $Version
+& $VPy -I (Join-Path $Root 'packaging\make_source_zip.py') $Root $srcZip $Version
 $sums = foreach ($f in @($out, $srcZip)) { "{0}  {1}" -f (Get-FileHash $f -Algorithm SHA256).Hash.ToLower(), (Split-Path $f -Leaf) }
 Set-Content -Path (Join-Path $Dist 'SHA256SUMS.txt') -Value $sums -Encoding ascii
 Copy-Item $out (Join-Path $Dist 'ShapeShifter-Setup.exe') -Force
