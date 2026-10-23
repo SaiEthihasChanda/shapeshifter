@@ -693,6 +693,9 @@ class WheelOverlay(WheelView):
                             | Qt.WindowType.NoDropShadowWindowHint)
         self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
         self.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose)
+        # macOS hides tool windows while their app isn't the active one; the wheel must stay on screen
+        # (it closes on focus loss by itself when that setting is on).
+        self.setAttribute(Qt.WidgetAttribute.WA_MacAlwaysShowToolWindow)
         self.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
         self.setWindowTitle("ShapeShifter")
 

@@ -152,7 +152,8 @@ class Controller(QObject):
         if not paths:
             return
         if target is None and self.wheel is not None and self.wheel.state == "choose" \
-                and not self.wheel.auto_target:
+                and not self.wheel.auto_target and self.wheel.isVisible():
+            log.info("Adding %d file(s) to the open wheel", len(paths))
             self.wheel.add_paths(paths)
             return
         self.pending.extend(paths)
@@ -164,6 +165,9 @@ class Controller(QObject):
 
     def _flush(self):
         if self.wheel is not None:
+            if not self.wheel.isVisible() and self.wheel.state == "choose":
+                log.info("Closing a wheel that is no longer on screen")
+                self.wheel.close()                   # its "closed" signal shows the new files
             return  # shown after the current wheel closes
         paths = list(dict.fromkeys(self.pending))
         target, self.pending_target = self.pending_target, None
