@@ -1,5 +1,9 @@
 # Changelog
 
+## 2.9.0
+- **ShapeShifter for Mac** (Apple Silicon, macOS 12+): the same app as on Windows. A menu-bar app with **right-click › Quick Actions › Convert with ShapeShifter** in Finder, hotkeys (**⌃⌥C**) and mouse triggers over Finder and the desktop, the wheel, Fill form, Properties, every converter, text recognition with the one built into macOS, the Trash for originals, and updates that install themselves. Download `ShapeShifter-macOS.dmg`.
+- Settings on a Mac show whether the Accessibility and Automation permissions the hotkeys need are on, with buttons to the right System Settings page; the Engines page installs ffmpeg, pandoc, LibreOffice and 7-Zip with Homebrew.
+
 ## 2.8.0
 - **Move and resize fields** in the Fill form window: drag a frame to move it, drag its edges or corners to resize it (check boxes stay square), arrow keys nudge the selected field (Shift for 10 px) and Delete removes it. Works for found fields and ones you add.
 - **Fonts and sizes**: the writing can be any font installed in Windows, not only Typed / Handwriting / Typewriter, and the size is a percentage you type. Select a field to give that one answer its own font and size.

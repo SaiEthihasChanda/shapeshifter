@@ -223,11 +223,15 @@ class EventTap:
         mods = mods_from_flags(Quartz.CGEventGetFlags(event))
         matches = [b for b in self._mouse if b.button == button and b.mods == mods]
         if not matches:
+            if any(b.button == button for b in self._mouse):
+                log.info("Mouse %s with modifiers %d: no trigger uses those modifiers", button, mods)
             return False
         loc = Quartz.CGEventGetLocation(event)
         window = finder_window_at(loc.x, loc.y)
         if window is None:
+            log.info("Mouse trigger %s at %.0f,%.0f ignored: not over Finder or the desktop", button, loc.x, loc.y)
             return False
+        log.info("Mouse trigger %s at %.0f,%.0f over Finder window %s", button, loc.x, loc.y, window)
         if button.startswith("wheel:"):
             now = time.monotonic()
             if now - self._last_wheel < 0.6:            # one trigger per scroll gesture

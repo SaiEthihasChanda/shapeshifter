@@ -221,7 +221,12 @@ end tell''')
         mid = len(log.read_text(encoding="utf-8", errors="replace"))
         found = finder_window_at(*point)
         _post_middle_click(*point, 0x40000)                   # control + middle click
-        time.sleep(3)
+        for _ in range(20):
+            time.sleep(0.5)
+            text2 = log.read_text(encoding="utf-8", errors="replace")[mid:]
+            if "Showing the wheel" in text2:
+                break
+        time.sleep(1)
         print("      mouse:", screenshot(shots, "5-mouse-trigger-wheel"))
         text2 = log.read_text(encoding="utf-8", errors="replace")[mid:]
         if "Showing the wheel" not in text2:
