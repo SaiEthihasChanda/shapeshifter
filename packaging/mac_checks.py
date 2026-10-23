@@ -151,6 +151,91 @@ def check_event_tap():
     return f"tap running with {status}"
 
 
+def _post_key(code: int, flags: int):
+    import Quartz
+    for down in (True, False):
+        ev = Quartz.CGEventCreateKeyboardEvent(None, code, down)
+        Quartz.CGEventSetFlags(ev, flags)
+        Quartz.CGEventPost(Quartz.kCGHIDEventTap, ev)
+        time.sleep(0.05)
+
+
+def _post_middle_click(x: float, y: float, flags: int):
+    import Quartz
+    for kind in (Quartz.kCGEventOtherMouseDown, Quartz.kCGEventOtherMouseUp):
+        ev = Quartz.CGEventCreateMouseEvent(None, kind, (x, y), Quartz.kCGMouseButtonCenter)
+        Quartz.CGEventSetIntegerValueField(ev, Quartz.kCGMouseEventButtonNumber, 2)
+        Quartz.CGEventSetFlags(ev, flags)
+        Quartz.CGEventPost(Quartz.kCGHIDEventTap, ev)
+        time.sleep(0.05)
+
+
+def check_hotkey_end_to_end(tmp: Path, shots: Path):
+    """The whole hotkey path with real system events: files selected in Finder, ⌃⌥C pressed, the menu-bar app
+    (run from source, which has Accessibility on the CI machine) reads the selection and opens the wheel. Then the
+    same with ⌃ + middle click over the Finder window."""
+    from shapeshifter import config
+    from shapeshifter.mac import appkit
+    from shapeshifter.mac.events import KEYCODES, finder_window_at
+    if not appkit.accessibility_trusted():
+        return "note: no Accessibility access on this machine; the hotkey path can't be driven"
+    files = [tmp / "hot 1.png", tmp / "hot 2.png"]
+    from PIL import Image
+    for p in files:
+        Image.new("RGB", (40, 30), (30, 120, 200)).save(p)
+    cfg = config.load()
+    cfg["hotkeys"] = [{"keys": "ctrl+alt+c", "action": "wheel"}, {"keys": "ctrl+mouse:middle", "action": "wheel"}]
+    cfg["close_on_focus_loss"] = False
+    config.save(cfg)
+    log = config.LOG_FILE
+    start = log.stat().st_size if log.exists() else 0
+    daemon = subprocess.Popen([sys.executable, "-m", "shapeshifter", "daemon"], cwd=str(ROOT),
+                              stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    try:
+        time.sleep(8)
+        sel = ", ".join(f'POSIX file "{p}" as alias' for p in files)
+        r = osascript(f'''
+tell application "Finder"
+    activate
+    open POSIX file "{tmp}"
+    delay 1
+    select {{{sel}}}
+end tell''')
+        if r.returncode != 0:
+            return f"note: couldn't drive Finder ({r.stderr.strip()[:160]})"
+        time.sleep(1.5)
+        _post_key(KEYCODES["c"], 0x40000 | 0x80000)          # control + option + C
+        time.sleep(3)
+        print("      hotkey:", screenshot(shots, "4-hotkey-wheel"))
+        text = log.read_text(encoding="utf-8", errors="replace")[start:]
+        if "Showing the wheel for 2 file(s)" not in text:
+            raise RuntimeError("⌃⌥C didn't open the wheel for the two selected files; log:\n" + text[-2500:])
+        # close the wheel (Escape), then a mouse trigger over the Finder window
+        _post_key(KEYCODES["escape"], 0)
+        time.sleep(1.5)
+        osascript('tell application "Finder" to activate')
+        time.sleep(1)
+        b = osascript('tell application "Finder" to get bounds of front window').stdout.strip()
+        x0, y0, x1, y1 = (float(v) for v in b.split(", "))
+        point = ((x0 + x1) / 2, y1 - 40)                      # an empty spot inside the window
+        mid = len(log.read_text(encoding="utf-8", errors="replace"))
+        found = finder_window_at(*point)
+        _post_middle_click(*point, 0x40000)                   # control + middle click
+        time.sleep(3)
+        print("      mouse:", screenshot(shots, "5-mouse-trigger-wheel"))
+        text2 = log.read_text(encoding="utf-8", errors="replace")[mid:]
+        if "Showing the wheel" not in text2:
+            raise RuntimeError(f"⌃+middle click over Finder (window {found}) didn't open the wheel; log:\n"
+                               + text2[-2500:])
+        return f"⌃⌥C opened the wheel for 2 Finder files; ⌃+middle click over Finder window {found} opened it too"
+    finally:
+        daemon.terminate()
+        try:
+            daemon.wait(10)
+        except subprocess.TimeoutExpired:
+            daemon.kill()
+
+
 def check_launch_agent(tmp: Path):
     from shapeshifter.mac import integration
     agent = integration.AGENT
@@ -227,6 +312,7 @@ def main() -> int:
         report("Quick Action", lambda: check_quick_action(tmp))
         report("event tap (hotkeys, mouse triggers)", check_event_tap)
         report("start at login (LaunchAgent)", lambda: check_launch_agent(tmp))
+        report("hotkey and mouse trigger, end to end", lambda: check_hotkey_end_to_end(tmp, a.shots))
     print("ALL OK" if not failures else f"{failures} CHECK(S) FAILED")
     return 1 if failures else 0
 

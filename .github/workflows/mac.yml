@@ -46,11 +46,36 @@ jobs:
         continue-on-error: true
         run: python packaging/mac_checks.py
 
+      # Optional: a self-signed code-signing certificate (secrets MAC_CERT_P12 = the .p12 in base64, and
+      # MAC_CERT_PASSWORD). Signing every build with the same certificate lets macOS keep the Accessibility and
+      # Automation permissions across updates; without it each build gets an ad-hoc signature.
+      - name: Signing identity
+        id: sign
+        env:
+          P12: ${{ secrets.MAC_CERT_P12 }}
+          PW: ${{ secrets.MAC_CERT_PASSWORD }}
+        run: |
+          if [ -z "$P12" ]; then echo "identity=-" >> "$GITHUB_OUTPUT"; echo "No certificate: ad-hoc signature"; exit 0; fi
+          KC="$RUNNER_TEMP/sign.keychain-db"; KP="$(uuidgen)"
+          security create-keychain -p "$KP" "$KC"
+          security set-keychain-settings -lut 21600 "$KC"
+          security unlock-keychain -p "$KP" "$KC"
+          printf '%s' "$P12" | base64 --decode > "$RUNNER_TEMP/sign.p12"
+          security import "$RUNNER_TEMP/sign.p12" -k "$KC" -P "$PW" -T /usr/bin/codesign
+          security set-key-partition-list -S apple-tool:,apple: -s -k "$KP" "$KC" >/dev/null
+          security list-keychains -d user -s "$KC" $(security list-keychains -d user | tr -d '"')
+          openssl pkcs12 -in "$RUNNER_TEMP/sign.p12" -nokeys -passin "pass:$PW" -out "$RUNNER_TEMP/sign.pem"
+          sudo security add-trusted-cert -d -r trustRoot -p codeSign -k /Library/Keychains/System.keychain "$RUNNER_TEMP/sign.pem"
+          rm -f "$RUNNER_TEMP/sign.p12"
+          security find-identity -p codesigning "$KC"
+          echo "identity=ShapeShifter Code Signing (self-signed)" >> "$GITHUB_OUTPUT"
+
       - name: Build ShapeShifter.app and the .dmg
         id: build
         env:
           PYTHON: python
           FFMPEG_DIR: ${{ runner.temp }}/ffmpeg
+          MAC_SIGN_IDENTITY: ${{ steps.sign.outputs.identity }}
         run: packaging/build_mac.sh --skip-tests
 
       - name: Built app checks

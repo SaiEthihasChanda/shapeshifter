@@ -24,6 +24,23 @@ Uninstall from **Settings › Apps › Installed apps › ShapeShifter**. You ca
 **From source** (developers): `install.cmd` / `install.ps1` installs into a private Python
 environment. It needs Python 3.10+ from python.org; Anaconda and Store builds don't work.
 
+### Mac (Apple Silicon)
+
+**Download:** get `ShapeShifter-macOS.dmg` from the [latest release](https://github.com/SaiEthihasChanda/shapeshifter/releases/latest),
+open it and drag ShapeShifter onto Applications. Needs macOS 12 or later on an M1 or newer Mac.
+- The app isn't notarised by Apple, so the first time macOS says it can't check it. Open **System Settings › Privacy & Security**,
+  scroll down and click **Open Anyway** next to ShapeShifter (or run `xattr -dr com.apple.quarantine /Applications/ShapeShifter.app`).
+  You only do this once; updates install themselves.
+- ShapeShifter lives in the **menu bar**. It adds **right-click › Quick Actions › Convert with ShapeShifter** to Finder and starts when you log in.
+- Hotkeys (**⌃⌥C** opens the wheel for the files selected in Finder) and mouse triggers need two permissions, which macOS asks for
+  the first time: **Accessibility** (to see the hotkey) and **Automation › Finder** (to see which files are selected). Settings › General
+  shows whether they're on.
+- Everything works as on Windows; text recognition uses the one built into macOS, and the original goes to the Trash.
+- Uninstall from **Settings › About › Uninstall ShapeShifter…** (removes the Quick Action, start at login and settings, and moves the
+  app to the Trash).
+
+Build it yourself on a Mac with `packaging/build_mac.sh` (Python 3.10+ from python.org).
+
 ## Use
 
 | How | What |
