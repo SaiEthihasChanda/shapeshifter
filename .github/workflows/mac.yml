@@ -1,0 +1,86 @@
+# Builds, tests and checks the macOS (Apple Silicon) app on GitHub's M1 machines, and attaches the .dmg to the
+# release of a version tag.
+name: mac
+on:
+  push:
+    branches: [mac, main]
+    tags: ["v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  mac:
+    runs-on: macos-14
+    timeout-minutes: 75
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: { python-version: "3.12" }
+
+      - name: Tools (pandoc for the tests, a static Apple Silicon ffmpeg for the tests and the app)
+        run: |
+          brew install pandoc >/dev/null
+          mkdir -p "$RUNNER_TEMP/ffmpeg"
+          for tool in ffmpeg ffprobe; do
+            curl -fsSL -o "$RUNNER_TEMP/$tool.zip" "https://ffmpeg.martin-riedl.de/redirect/latest/macos/arm64/release/$tool.zip"
+            unzip -oq "$RUNNER_TEMP/$tool.zip" -d "$RUNNER_TEMP/ffmpeg"
+          done
+          chmod +x "$RUNNER_TEMP/ffmpeg/"*
+          "$RUNNER_TEMP/ffmpeg/ffmpeg" -hide_banner -version | head -1
+          file "$RUNNER_TEMP/ffmpeg/ffmpeg"
+          echo "$RUNNER_TEMP/ffmpeg" >> "$GITHUB_PATH"
+          sw_vers; uname -m
+
+      - name: Install
+        run: python -m pip install -q . pytest
+
+      - name: Tests
+        id: tests
+        continue-on-error: true
+        run: python -m pytest -q -p no:cacheprovider tests
+
+      - name: Mac integration checks (source)
+        id: checks
+        continue-on-error: true
+        run: python packaging/mac_checks.py
+
+      - name: Build ShapeShifter.app and the .dmg
+        id: build
+        env:
+          PYTHON: python
+          FFMPEG_DIR: ${{ runner.temp }}/ffmpeg
+        run: packaging/build_mac.sh --skip-tests
+
+      - name: Built app checks
+        id: appchecks
+        continue-on-error: true
+        run: |
+          ditto .build-mac/dist/ShapeShifter.app /Applications/ShapeShifter.app
+          python packaging/mac_checks.py --app /Applications/ShapeShifter.app --shots mac-shots
+          cp ~/Library/Application\ Support/ShapeShifter/Data/shapeshifter.log mac-shots/ 2>/dev/null || true
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: ShapeShifter-macOS
+          path: |
+            dist/ShapeShifter-*-macOS.dmg
+            mac-shots/
+          if-no-files-found: warn
+
+      - name: Attach to the release
+        if: startsWith(github.ref, 'refs/tags/') && steps.tests.outcome == 'success' && steps.appchecks.outcome == 'success'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          tag="${GITHUB_REF_NAME}"
+          for i in $(seq 1 60); do gh release view "$tag" >/dev/null 2>&1 && break; sleep 30; done
+          gh release upload "$tag" dist/ShapeShifter-*-macOS.dmg dist/ShapeShifter-macOS.dmg --clobber
+
+      - name: Result
+        if: always()
+        run: |
+          echo "tests: ${{ steps.tests.outcome }}, checks: ${{ steps.checks.outcome }}, build: ${{ steps.build.outcome }}, app: ${{ steps.appchecks.outcome }}"
+          test "${{ steps.tests.outcome }}" = success -a "${{ steps.checks.outcome }}" = success -a "${{ steps.appchecks.outcome }}" = success

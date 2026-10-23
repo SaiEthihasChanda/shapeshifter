@@ -12,11 +12,11 @@ from test_ocr import CFG, needs_ocr
 
 
 def _font(size, bold=False):
-    name = "arialbd.ttf" if bold else "arial.ttf"
+    from test_ocr import ARIAL, ARIAL_BOLD
     try:
-        return ImageFont.truetype(name, size)
+        return ImageFont.truetype(str(ARIAL_BOLD if bold else ARIAL), size)
     except OSError:
-        return ImageFont.load_default()
+        return ImageFont.load_default(size=size)
 
 
 def make_form(path: Path) -> Path:

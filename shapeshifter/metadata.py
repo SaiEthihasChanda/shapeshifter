@@ -73,26 +73,20 @@ def _file_fields(path: Path) -> list[Field]:
 
 
 def set_file_times(path: Path, created: str | None = None, modified: str | None = None) -> None:
-    """Set the creation and / or modification date shown in Explorer (local time, YYYY-MM-DD HH:MM:SS)."""
-    import ctypes
-    from ctypes import wintypes
+    """Set the creation and / or modification date shown in Explorer / Finder (local time, YYYY-MM-DD HH:MM:SS)."""
+    from .system import set_created_time
 
-    def filetime(text: str) -> int:
-        dt = datetime.strptime(_to_exif_date(text), "%Y:%m:%d %H:%M:%S")
-        return int((dt.timestamp() + 11644473600) * 10_000_000)
+    def stamp(text: str) -> float:
+        return datetime.strptime(_to_exif_date(text), "%Y:%m:%d %H:%M:%S").timestamp()
 
-    k32 = ctypes.windll.kernel32
-    k32.CreateFileW.restype = wintypes.HANDLE
-    handle = k32.CreateFileW(str(path), 0x100, 0, None, 3, 0x80, None)      # FILE_WRITE_ATTRIBUTES, OPEN_EXISTING
-    if handle in (wintypes.HANDLE(-1).value, None):
-        raise ConversionError("Couldn't change the file's dates.")
     try:
-        def ft(value):
-            return ctypes.byref(wintypes.FILETIME(value & 0xFFFFFFFF, value >> 32)) if value else None
-        if not k32.SetFileTime(handle, ft(filetime(created) if created else 0), None, ft(filetime(modified) if modified else 0)):
-            raise ConversionError("Couldn't change the file's dates.")
-    finally:
-        k32.CloseHandle(handle)
+        if modified:
+            st = os.stat(path)
+            os.utime(path, (st.st_atime, stamp(modified)))
+        if created:
+            set_created_time(path, stamp(created))
+    except (OSError, ValueError) as e:
+        raise ConversionError("Couldn't change the file's dates.") from e
 
 
 # =============================================================== pictures

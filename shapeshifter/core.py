@@ -113,7 +113,8 @@ def find_exe(name: str, extra_dirs: list[str | os.PathLike] = ()) -> str | None:
     found = shutil.which(name)
     if found:
         return found
-    for d in extra_dirs:
+    from .system import tool_dirs
+    for d in [*extra_dirs, *tool_dirs()]:
         for candidate in (Path(d) / f"{name}.exe", Path(d) / name):
             if candidate.is_file():
                 return str(candidate)

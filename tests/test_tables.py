@@ -208,7 +208,8 @@ class TestFromPictures:
 
     @needs_ocr
     def test_a_picture_of_a_table_becomes_a_spreadsheet(self, tmp_path):
-        f = ImageFont.truetype("arial.ttf", 28)
+        from test_ocr import ARIAL
+        f = ImageFont.truetype(str(ARIAL), 28)
         im = Image.new("RGB", (900, 420), "white")
         d = ImageDraw.Draw(im)
         rows = [["Item", "Qty", "Price"], ["Pencil", "12", "1.50"], ["Notebook", "5", "3.25"], ["Ruler", "8", "2.00"]]

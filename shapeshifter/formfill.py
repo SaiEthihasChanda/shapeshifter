@@ -6,7 +6,6 @@ of exactly what will be written to the new image.
 from __future__ import annotations
 
 import logging
-import os
 import shutil
 from pathlib import Path
 
@@ -17,6 +16,7 @@ from PySide6.QtWidgets import (QApplication, QCheckBox, QComboBox, QDialog, QFil
                                QScrollArea, QSpinBox, QVBoxLayout, QWidget)
 
 from . import config, forms
+from .system import reveal
 from .core import ConversionError
 
 log = logging.getLogger(__name__)
@@ -696,5 +696,5 @@ class FormFiller(QDialog):
         box.addButton("Close", QMessageBox.ButtonRole.AcceptRole)
         box.exec()
         if box.clickedButton() is show:
-            os.startfile(out.parent)
+            reveal(out)
         self.accept()

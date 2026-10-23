@@ -1,4 +1,4 @@
-"""OCR: paragraph/heading logic, failure handling, and (where Windows OCR works) real runs."""
+"""OCR: paragraph/heading logic, failure handling, and (where Windows OCR / macOS Vision works) real runs."""
 
 from __future__ import annotations
 
@@ -20,7 +20,11 @@ from shapeshifter.native import docs  # noqa: E402
 from shapeshifter.native.docx import blocks_to_docx  # noqa: E402
 
 CFG = dict(config.DEFAULTS, original="keep", learn_reverse=False)
-ARIAL = Path(r"C:\Windows\Fonts\arial.ttf")
+SANS_FONTS = (r"C:\Windows\Fonts\arial.ttf", "/System/Library/Fonts/Supplemental/Arial.ttf", "/Library/Fonts/Arial.ttf")
+BOLD_FONTS = (r"C:\Windows\Fonts\arialbd.ttf", "/System/Library/Fonts/Supplemental/Arial Bold.ttf",
+              "/Library/Fonts/Arial Bold.ttf")
+ARIAL = next((Path(p) for p in SANS_FONTS if Path(p).exists()), Path("no-sans-font.ttf"))
+ARIAL_BOLD = next((Path(p) for p in BOLD_FONTS if Path(p).exists()), ARIAL)
 
 
 def _windows_ocr_works() -> bool:
@@ -30,7 +34,7 @@ def _windows_ocr_works() -> bool:
         return False
 
 
-needs_ocr = pytest.mark.skipif(not _windows_ocr_works(), reason="Windows OCR not usable here")
+needs_ocr = pytest.mark.skipif(not _windows_ocr_works(), reason="system OCR not usable here")
 
 
 def convert(path: Path, target: str) -> list[Path]:
@@ -81,6 +85,7 @@ def test_powershell_single_item_json_quirk():
 
 # --------------------------------------------------------------- failure handling
 
+@pytest.mark.skipif(sys.platform != "win32", reason="Windows OCR languages")
 def test_no_ocr_language_gives_clear_message_and_hides_ocr(tmp_path, monkeypatch):
     img = tmp_path / "a.png"
     Image.new("RGB", (200, 100), "white").save(img)

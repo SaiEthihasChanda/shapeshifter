@@ -32,7 +32,7 @@ def sevenzip_path() -> str | None:
     local = os.environ.get("LOCALAPPDATA")
     if local:
         dirs.append(Path(local) / "Programs" / "7-Zip")
-    return find_exe("7z", dirs)
+    return find_exe("7z", dirs) or find_exe("7zz", dirs)     # 7zz: 7-Zip's own macOS / Linux build
 
 
 def parse_listing(text: str) -> list[dict]:

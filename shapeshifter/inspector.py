@@ -15,6 +15,7 @@ from PySide6.QtWidgets import (QDialog, QHBoxLayout, QHeaderView, QLabel, QPlain
 from . import engine
 from .formats import name_of
 from .identify import identify, magika_available
+from .system import open_path
 
 _open: list[QDialog] = []
 
@@ -164,11 +165,10 @@ class Inspector(QDialog):
         lay.addLayout(row)
 
     def _describe(self):
-        import os
         from PySide6.QtWidgets import QMessageBox
         from . import custom
         path = custom.create_template(self.path)
-        os.startfile(path)
+        open_path(path)
         QMessageBox.information(
             self, "Describe this format",
             f"A description was created at\n{path}\n\nIt's pre-filled with this file's first "

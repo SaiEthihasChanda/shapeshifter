@@ -14,6 +14,9 @@ from PySide6.QtGui import QWheelEvent  # noqa: E402
 from PySide6.QtTest import QTest  # noqa: E402
 from PySide6.QtWidgets import QApplication  # noqa: E402
 
+if sys.platform != "win32":
+    pytest.skip("Windows mouse hook", allow_module_level=True)
+
 from shapeshifter import mousehook  # noqa: E402
 
 

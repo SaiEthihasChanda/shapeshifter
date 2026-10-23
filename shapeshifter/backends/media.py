@@ -13,6 +13,7 @@ from pathlib import Path
 
 from ..formats import CATEGORIES
 from .base import NO_WINDOW, Backend, Cancelled, Context, ConversionError, find_exe, target_ext
+from ..system import exe_name
 
 log = logging.getLogger(__name__)
 
@@ -83,7 +84,7 @@ REMUX = {
 
 
 def _bundled_dir() -> Path | None:
-    """ffmpeg shipped inside the packaged app (ShapeShifter.exe build)."""
+    """ffmpeg shipped inside the packaged app (ShapeShifter.exe / ShapeShifter.app build)."""
     import sys
     if getattr(sys, "frozen", False):
         return Path(sys.executable).parent / "ffmpeg"
@@ -100,8 +101,8 @@ def _ffmpeg_dirs():
 @lru_cache(maxsize=1)
 def ffmpeg_path() -> str | None:
     bundled = _bundled_dir()
-    if bundled and (bundled / "ffmpeg.exe").is_file():
-        return str(bundled / "ffmpeg.exe")
+    if bundled and (bundled / exe_name("ffmpeg")).is_file():
+        return str(bundled / exe_name("ffmpeg"))
     return find_exe("ffmpeg", _ffmpeg_dirs())
 
 
@@ -109,7 +110,7 @@ def ffmpeg_path() -> str | None:
 def ffprobe_path() -> str | None:
     ff = ffmpeg_path()
     if ff:
-        sibling = Path(ff).with_name("ffprobe.exe")
+        sibling = Path(ff).with_name(exe_name("ffprobe"))
         if sibling.is_file():
             return str(sibling)
     return find_exe("ffprobe", _ffmpeg_dirs())

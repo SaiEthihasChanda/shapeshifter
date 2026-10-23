@@ -801,11 +801,8 @@ class WheelOverlay(WheelView):
         self.raise_()
         self.activateWindow()
         self.setFocus()
-        try:
-            from .winutil import force_foreground
-            force_foreground(int(self.winId()))
-        except Exception:
-            log.exception("force_foreground failed")
+        from .system import bring_to_front
+        bring_to_front(self)
 
     def _set_t(self, v):
         self._t = float(v)

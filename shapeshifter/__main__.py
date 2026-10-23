@@ -6,7 +6,7 @@
   shapeshifter identify FILE             say what FILE really is
   shapeshifter daemon                    run the tray icon + global hotkeys
   shapeshifter settings                  open the settings app
-  shapeshifter install / uninstall       add or remove Windows integration
+  shapeshifter install / uninstall       add or remove Windows / Finder integration
   shapeshifter selftest                  check that every engine works (for builds)
 """
 
@@ -23,7 +23,7 @@ CLI_COMMANDS = {"convert", "combine", "targets", "identify", "fill", "meta", "in
 
 def _attach_console() -> None:
     """The packaged app is a windowed exe; when run from a terminal, print there."""
-    if not getattr(sys, "frozen", False) or (sys.stdout and sys.stdout.isatty()):
+    if sys.platform != "win32" or not getattr(sys, "frozen", False) or (sys.stdout and sys.stdout.isatty()):
         return
     import ctypes
     import msvcrt
@@ -215,19 +215,20 @@ def cmd_fill(args) -> int:
 
 
 def cmd_uninstall(remove_files: bool) -> int:
-    from . import shell
+    from . import integration
     if not remove_files:
-        shell.uninstall()
+        integration.uninstall()
         return 0
-    return shell.uninstall_everything()
+    return integration.uninstall_everything()
 
 
 def cmd_selftest() -> int:
     """Convert a few generated files through every engine; prints one line per check."""
     import tempfile
     from pathlib import Path
-    from . import config, engine, explorer
+    from . import config, engine
     from .backends import Context
+    from .system import IS_MAC
     from .backends.media import ffmpeg_path
     from .native import pdfwrite
 
@@ -285,10 +286,10 @@ def cmd_selftest() -> int:
     from . import ocr as ocr_mod
     if ocr_mod.available():
         def ocr_check():
-            from PIL import ImageDraw, ImageFont
+            from PIL import ImageDraw
+            from .forms import find_font
             im = Image.new("RGB", (900, 200), "white")
-            ImageDraw.Draw(im).text((40, 50), "Hello ShapeShifter", fill="black",
-                                    font=ImageFont.truetype(r"C:\Windows\Fonts\arial.ttf", 64))
+            ImageDraw.Draw(im).text((40, 50), "Hello ShapeShifter", fill="black", font=find_font("Typed", 64))
             p = d / "ocr.png"
             im.save(p)
             out = engine.convert_inplace(p, "txt", Context(cfg=cfg)).outputs[0]
@@ -296,9 +297,9 @@ def cmd_selftest() -> int:
             if "shapeshifter" not in text.lower():
                 raise RuntimeError(f"unexpected OCR result {text!r}")
             return repr(text.strip())
-        check("Windows OCR image -> text", ocr_check)
+        check(("macOS Vision" if IS_MAC else "Windows OCR") + " image -> text", ocr_check)
     else:
-        print("skip  Windows OCR not available")
+        print("skip  text recognition not available")
     srt = d / "subs.srt"
     srt.write_text("1\n00:00:01,000 --> 00:00:02,000\nHello\n")
     check("native SRT -> VTT (configured kind)", lambda: conv(srt, "vtt"))
@@ -413,7 +414,19 @@ def cmd_selftest() -> int:
     glb_obj = d / "tri2.obj"
     glb_obj.write_text("v 0 0 0\nv 1 0 0\nv 0 1 0\nf 1 2 3\n")
     check("3D OBJ -> GLB", lambda: conv(glb_obj, "glb"))
-    check("UI Automation (mouse triggers)", lambda: (explorer._automation(), "")[1])
+    if IS_MAC:
+        def mac_check():
+            import Quartz  # noqa: F401 - the event tap (hotkeys, mouse triggers)
+            from ApplicationServices import AXIsProcessTrustedWithOptions  # noqa: F401
+            from .mac import finder, integration
+            if finder._compiled() is None:
+                raise RuntimeError("the Finder script didn't compile")
+            plist = integration._workflow_plist("true")
+            return f"event tap, Accessibility and Finder scripting load; Quick Action has {len(plist['actions'])} step"
+        check("macOS integration", mac_check)
+    else:
+        from . import explorer
+        check("UI Automation (mouse triggers)", lambda: (explorer._automation(), "")[1])
     import shutil
     shutil.rmtree(d, ignore_errors=True)
     print("ALL OK" if ok else "SOME CHECKS FAILED")
@@ -465,11 +478,11 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--gui", action="store_true", help="open the properties window")
     sub.add_parser("daemon", help="tray icon + global hotkeys")
     sub.add_parser("settings", help="open the settings app")
-    p = sub.add_parser("install", help="register context menu, shortcuts, autostart")
+    p = sub.add_parser("install", help="register the right-click menu entry, shortcuts and start at login")
     p.add_argument("--no-startup", action="store_true")
     p.add_argument("--uninstall-cmd")
     p.add_argument("--install-dir")
-    p = sub.add_parser("uninstall", help="remove Windows integration")
+    p = sub.add_parser("uninstall", help="remove the Windows / Finder integration")
     p.add_argument("--remove-files", action="store_true",
                    help="also delete the installed app (packaged build)")
     sub.add_parser("register", help="refresh the right-click menu entry")
@@ -497,15 +510,15 @@ def main(argv: list[str] | None = None) -> int:
             from .app import run_daemon
             return run_daemon()
         if args.cmd == "install":
-            from . import shell
-            shell.install(args.uninstall_cmd, args.install_dir, startup=not args.no_startup)
+            from . import integration
+            integration.install(args.uninstall_cmd, args.install_dir, startup=not args.no_startup)
             return 0
         if args.cmd == "uninstall":
             return cmd_uninstall(args.remove_files)
         if args.cmd == "register":
-            from . import shell
-            shell.register_context_menu()
-            print("Registered the 'Convert to…' entry for all files")
+            from . import integration
+            integration.register_context_menu()
+            print("Registered the right-click entry for all files")
             return 0
         if args.cmd == "selftest":
             return cmd_selftest()

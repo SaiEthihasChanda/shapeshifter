@@ -249,7 +249,7 @@ def test_meshes_round_trip(tmp_path):
 
 
 def test_fonts_round_trip(tmp_path):
-    src = Path(r"C:\Windows\Fonts\arial.ttf")
+    from test_ocr import ARIAL as src
     if not src.exists():
         pytest.skip("no system font to test with")
     ttf = tmp_path / "font.ttf"

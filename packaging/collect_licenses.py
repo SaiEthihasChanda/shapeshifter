@@ -29,16 +29,24 @@ KNOWN_LICENSES = {                             # when package metadata is vague
     "PySide6_Essentials": "LGPL-3.0-only (Qt for Python)", "shiboken6": "LGPL-3.0-only",
 }
 
+MAC = sys.platform == "darwin"
+FFMPEG_BUILD = ("https://ffmpeg.martin-riedl.de" if MAC else "https://www.gyan.dev/ffmpeg/builds/")
+FFMPEG_EXE = "ffmpeg/ffmpeg" if MAC else "ffmpeg\\ffmpeg.exe"
+
 STATIC = [
     ("Python", "3.12", "PSF-2.0", "https://docs.python.org/3/license.html",
      "The Python runtime is bundled in the application folder."),
     ("Qt 6 (via PySide6)", "6.x", "LGPL-3.0-only",
      "https://www.qt.io/licensing/open-source-lgpl-obligations",
-     "Qt is used as dynamic libraries (separate .dll files in the application folder), so you may "
-     "replace them with your own build. Source: https://download.qt.io/official_releases/qt/"),
+     ("Qt is used as dynamic libraries (separate frameworks inside ShapeShifter.app), so you may "
+      if MAC else "Qt is used as dynamic libraries (separate .dll files in the application folder), so you may ")
+     + "replace them with your own build. Source: https://download.qt.io/official_releases/qt/"),
     ("MuPDF (inside PyMuPDF)", "", "AGPL-3.0 (or Artifex commercial)",
      "https://github.com/ArtifexSoftware/mupdf",
      "PDF engine. ShapeShifter itself is also AGPL-3.0-or-later; see SOURCE.txt."),
+    ("Apple Vision, AppKit, Quartz (via PyObjC)", "", "Part of macOS",
+     "https://developer.apple.com/documentation/vision",
+     "System frameworks of your Mac. Not distributed with ShapeShifter.") if MAC else
     ("Windows OCR (Windows.Media.Ocr)", "", "Part of Windows",
      "https://learn.microsoft.com/uwp/api/windows.media.ocr",
      "Called through Windows PowerShell on your PC. Not distributed with ShapeShifter."),
@@ -56,9 +64,9 @@ def bundled_distributions(exe: Path) -> list[str]:
         if entry[4] == "z":
             modules |= set(archive.open_embedded_archive(name).toc)
     tops = {m.split(".")[0] for m in modules}
-    internal = exe.parent / "_internal"
-    if internal.is_dir():
-        tops |= {p.name.split(".")[0] for p in internal.iterdir()}
+    for internal in (exe.parent / "_internal", exe.parent.parent / "Frameworks", exe.parent.parent / "Resources"):
+        if internal.is_dir():                    # Windows folder build / macOS .app bundle
+            tops |= {p.name.split(".")[0] for p in internal.iterdir()}
     mapping = packages_distributions()
     found = {d for t in tops for d in mapping.get(t, [])}
     return sorted(found - SKIP - BUILD_ONLY, key=str.lower)
@@ -87,7 +95,7 @@ def describe(name: str) -> dict:
 
 
 def ffmpeg_info(ffmpeg_dir: Path | None) -> tuple[str, str] | None:
-    exe = ffmpeg_dir / "ffmpeg.exe" if ffmpeg_dir else None
+    exe = ffmpeg_dir / ("ffmpeg" if MAC else "ffmpeg.exe") if ffmpeg_dir else None
     if not exe or not exe.is_file():
         return None
     try:
@@ -131,9 +139,10 @@ def write_text(records, static, ffmpeg, path: Path, version: str) -> None:
     for title, ver, lic, url, note in static:
         lines += [f"{title} {ver}".strip(), f"  Licence: {lic}", f"  {url}", f"  {note}", ""]
     if ffmpeg:
-        lines += [ffmpeg[0], f"  Licence: {ffmpeg[1]}", "  https://ffmpeg.org  (build: https://www.gyan.dev/ffmpeg/builds/)",
-                  "  Runs as a separate program (ffmpeg\\ffmpeg.exe). Its licence text is ffmpeg\\LICENSE.txt;",
-                  "  its source code is available from the links above and in ffmpeg\\SOURCE.txt.", ""]
+        sep = "/" if MAC else "\\"
+        lines += [ffmpeg[0], f"  Licence: {ffmpeg[1]}", f"  https://ffmpeg.org  (build: {FFMPEG_BUILD})",
+                  f"  Runs as a separate program ({FFMPEG_EXE}). Its licence text is ffmpeg{sep}LICENSE.txt;",
+                  f"  its source code is available from the links above and in ffmpeg{sep}SOURCE.txt.", ""]
     lines += ["Python packages", "-" * 40]
     for r in records:
         lines += [f"{r['name']} {r['version']}", f"  Licence: {r['license']}"]

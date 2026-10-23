@@ -1,4 +1,4 @@
-"""Qt application: single-instance leader, tray daemon and global hotkeys."""
+"""Qt application: single-instance leader, tray (menu-bar) daemon and global hotkeys."""
 
 from __future__ import annotations
 
@@ -6,17 +6,17 @@ import json
 import logging
 import os
 import sys
-from ctypes import wintypes
 from pathlib import Path
 
-from PySide6.QtCore import QAbstractNativeEventFilter, QFileSystemWatcher, QObject, Qt, QTimer, \
+from PySide6.QtCore import QAbstractNativeEventFilter, QEvent, QFileSystemWatcher, QObject, Qt, QTimer, \
     Signal
 from PySide6.QtGui import QAction, QActionGroup, QIcon
 from PySide6.QtNetwork import QLocalServer
-from PySide6.QtWidgets import QApplication, QFileDialog, QMenu, QSystemTrayIcon, QWidget
+from PySide6.QtWidgets import QApplication, QFileDialog, QLabel, QMenu, QSystemTrayIcon, QWidget
 
 from . import APP_NAME, APP_USER_MODEL_ID, config, ipc
 from .icon import ensure_icon
+from .system import FILE_MANAGER, IS_MAC, IS_WIN, TRASH, pretty_modifier
 
 log = logging.getLogger(__name__)
 
@@ -25,12 +25,13 @@ WM_HOTKEY = 0x0312
 
 
 def _make_app() -> QApplication:
-    try:
-        # Attributes notifications/taskbar to us instead of "Python".
-        import ctypes
-        ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID(APP_USER_MODEL_ID)
-    except Exception:
-        pass
+    if IS_WIN:
+        try:
+            # Attributes notifications/taskbar to us instead of "Python".
+            import ctypes
+            ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID(APP_USER_MODEL_ID)
+        except Exception:
+            pass
     QApplication.setHighDpiScaleFactorRoundingPolicy(
         Qt.HighDpiScaleFactorRoundingPolicy.PassThrough)
     app = QApplication.instance() or QApplication(sys.argv)
@@ -62,9 +63,34 @@ MOUSE_NAMES = {
 
 
 def pretty_keys(spec: str) -> str:
-    names = {"ctrl": "Ctrl", "alt": "Alt", "shift": "Shift", "win": "Win", **MOUSE_NAMES}
-    return "+".join(names.get(p, p.upper() if len(p) <= 3 else p.capitalize())
-                    for p in spec.split("+") if p)
+    def name(p: str) -> str:
+        if p in ("ctrl", "alt", "shift", "win", "cmd"):
+            return pretty_modifier(p)
+        return MOUSE_NAMES.get(p, p.upper() if len(p) <= 3 else p.capitalize())
+    parts = [name(p) for p in spec.split("+") if p]
+    if IS_MAC:                                       # ⌃⌥C, ⌘ Middle click
+        mods = "".join(x for x in parts if x in "⌃⌥⇧⌘")
+        rest = [x for x in parts if x not in "⌃⌥⇧⌘"]
+        return (mods + (" " if mods and rest and len(rest[0]) > 1 else "") + "+".join(rest)) if rest else mods
+    return "+".join(parts)
+
+
+class _FileOpenFilter(QObject):
+    """macOS hands files to the running app as "open" events (Finder's Quick Action, Open With, dropping on the
+    app): each becomes a path for the wheel."""
+
+    def __init__(self, controller):
+        super().__init__(controller)
+        self.controller = controller
+
+    def eventFilter(self, obj, ev):
+        if ev.type() == QEvent.Type.FileOpen:
+            path = ev.file() or ev.url().toLocalFile()
+            if path:
+                log.info("Finder handed over %s", path)
+                self.controller.add_paths([path])
+            return True
+        return False
 
 
 class Controller(QObject):
@@ -80,6 +106,9 @@ class Controller(QObject):
         self.debounce = QTimer(self, singleShot=True, interval=250)
         self.debounce.timeout.connect(self._flush)
 
+        if IS_MAC:
+            QApplication.instance().installEventFilter(_FileOpenFilter(self))
+            QLocalServer.removeServer(ipc.SERVER_NAME)  # a socket left behind by a crash would block listen()
         self.server = QLocalServer(self)
         self.server.setSocketOptions(QLocalServer.SocketOption.UserAccessOption)
         self.server.newConnection.connect(self._on_connection)
@@ -171,6 +200,7 @@ class HotkeyFilter(QAbstractNativeEventFilter):
 
     def nativeEventFilter(self, event_type, message):
         if event_type == b"windows_generic_MSG":
+            from ctypes import wintypes
             msg = wintypes.MSG.from_address(int(message))
             if msg.message == WM_HOTKEY and msg.wParam >= HOTKEY_BASE:
                 hid = int(msg.wParam)
@@ -180,24 +210,54 @@ class HotkeyFilter(QAbstractNativeEventFilter):
 
 
 class MouseBridge(QObject):
-    """Carries mouse-hook triggers from the hook thread to the Qt thread."""
+    """Carries mouse-hook (and, on a Mac, hotkey) triggers from the hook thread to the Qt thread."""
     triggered = Signal(object)
+
+
+class Toast(QLabel):
+    """A short message in the top-right corner (macOS: notifications from an app that isn't notarized
+    may never show, so ShapeShifter shows its own)."""
+
+    def __init__(self, text: str, ms: int):
+        super().__init__(text)
+        self.setWindowFlags(Qt.WindowType.FramelessWindowHint | Qt.WindowType.Tool
+                            | Qt.WindowType.WindowStaysOnTopHint | Qt.WindowType.WindowDoesNotAcceptFocus)
+        self.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose)
+        self.setAttribute(Qt.WidgetAttribute.WA_ShowWithoutActivating)
+        self.setWordWrap(True)
+        self.setMaximumWidth(360)
+        self.setStyleSheet("QLabel { background: rgba(28,29,34,235); color: white; padding: 12px 16px;"
+                           " border-radius: 10px; font-size: 13px; }")
+        self.adjustSize()
+        screen = QApplication.primaryScreen().availableGeometry()
+        self.move(screen.right() - self.width() - 16, screen.top() + 16)
+        QTimer.singleShot(ms, self.close)
+        self.show()
 
 
 class Daemon(Controller):
     def __init__(self):
         super().__init__(daemon=True)
-        self._hotkey_window = QWidget()
-        self._hotkey_hwnd = int(self._hotkey_window.winId())
-        self._filter = HotkeyFilter(self.on_hotkey)
-        QApplication.instance().installNativeEventFilter(self._filter)
         self.bindings: dict[int, dict] = {}
         self.binding_status: list[tuple[dict, bool]] = []
         self.hotkeys_suspended = False
-        from .mousehook import MouseHook
+        self.needs_accessibility = False
         self._mouse_bridge = MouseBridge()
         self._mouse_bridge.triggered.connect(self.on_mouse_trigger)
-        self.mouse = MouseHook(self._mouse_bridge.triggered.emit)
+        if IS_MAC:
+            from .mac.events import EventTap
+            self._key_bridge = MouseBridge()
+            self._key_bridge.triggered.connect(self.on_mac_hotkey)
+            self.tap = EventTap(self._key_bridge.triggered.emit, self._mouse_bridge.triggered.emit)
+            self._tap_retry = QTimer(self, interval=3000)
+            self._tap_retry.timeout.connect(self._retry_tap)
+        else:
+            self._hotkey_window = QWidget()
+            self._hotkey_hwnd = int(self._hotkey_window.winId())
+            self._filter = HotkeyFilter(self.on_hotkey)
+            QApplication.instance().installNativeEventFilter(self._filter)
+            from .mousehook import MouseHook
+            self.mouse = MouseHook(self._mouse_bridge.triggered.emit)
         self.register_hotkeys()
         self.update_available = None
         self._update_worker = None
@@ -217,6 +277,8 @@ class Daemon(Controller):
     # -------------------------------------------------------------- hotkeys
 
     def register_hotkeys(self):
+        if IS_MAC:
+            return self._register_mac()
         from .mousehook import is_mouse_spec
         from .winutil import register_hotkey, unregister_hotkey
         for hid in list(self.bindings):
@@ -252,6 +314,59 @@ class Daemon(Controller):
             QTimer.singleShot(1000, explorer.warm_up)
         self.binding_status = [(b, status.get(i, False)) for i, b in enumerate(hotkeys)]
 
+    def _register_mac(self):
+        """macOS: every hotkey and mouse trigger goes through one event tap, which needs Accessibility access."""
+        from .triggers import is_mouse_spec
+        hotkeys = self.cfg.get("hotkeys", [])
+        keys, mouse = [], []
+        if not self.hotkeys_suspended:
+            for i, b in enumerate(hotkeys):
+                (mouse if is_mouse_spec(b.get("keys", "")) else keys).append((b.get("keys", ""), i))
+        status = dict(self.tap.set_bindings(keys, mouse))
+        self.binding_status = [(b, status.get(i, False)) for i, b in enumerate(hotkeys)]
+        wanted = bool(keys or mouse)
+        self.needs_accessibility = wanted and not self.tap.running
+        if self.needs_accessibility:
+            from .mac import appkit
+            if not getattr(self, "_asked_accessibility", False):
+                self._asked_accessibility = True
+                appkit.accessibility_trusted(prompt=True)        # macOS shows its own "allow" dialog once
+            self._tap_retry.start()
+        else:
+            self._tap_retry.stop()
+
+    def _retry_tap(self):
+        """Accessibility was switched on in System Settings: start the hotkeys without a restart."""
+        from .mac import appkit
+        if appkit.accessibility_trusted():
+            self._tap_retry.stop()
+            self.register_hotkeys()
+            if hasattr(self, "tray"):
+                self._update_tray()
+            if not self.needs_accessibility:
+                self.notify("Hotkeys are on.")
+
+    def on_mac_hotkey(self, index: int):
+        hotkeys = self.cfg.get("hotkeys", [])
+        if not 0 <= index < len(hotkeys):
+            return
+        self.run_binding(hotkeys[index], self._finder_selection())
+
+    def _finder_selection(self) -> list[str]:
+        from .mac import finder
+        try:
+            if not finder.finder_is_frontmost():
+                return []
+            return [p for p in finder.selected_files() if os.path.isfile(p)]
+        except finder.FinderAccessDenied as e:
+            self.notify(str(e))
+            from .mac import appkit
+            appkit.open_pane("automation")
+            return None
+        except Exception:
+            log.exception("Reading the Finder selection failed")
+            return []
+
     def suspend_hotkeys(self, suspended: bool):
         """Let the settings app capture key combos that are currently registered."""
         if suspended != self.hotkeys_suspended:
@@ -286,12 +401,17 @@ class Daemon(Controller):
         self.run_binding(b, paths)
 
     def on_mouse_trigger(self, trigger):
-        """A mouse binding fired over Explorer/the desktop (already filtered by the hook)."""
-        from . import explorer
+        """A mouse binding fired over Explorer/Finder/the desktop (already filtered by the hook)."""
         hotkeys = self.cfg.get("hotkeys", [])
         if not 0 <= trigger.payload < len(hotkeys):
             return
         b = hotkeys[trigger.payload]
+        if IS_MAC:
+            from .mac import finder
+            finder.select_item_at(trigger.x, trigger.y)
+            self.run_binding(b, self._finder_selection())
+            return
+        from . import explorer
         # Clicking a file acts on that file, like a left click would select it.
         explorer.select_item_at(trigger.x, trigger.y)
         try:
@@ -302,9 +422,11 @@ class Daemon(Controller):
         log.info("Mouse %s (%s): %d file(s) selected", b.get("keys"), b.get("action"), len(paths))
         self.run_binding(b, paths)
 
-    def run_binding(self, b: dict, paths: list[str]):
+    def run_binding(self, b: dict, paths: list[str] | None):
+        if paths is None:                            # already explained (e.g. a missing permission)
+            return
         if not paths:
-            self.notify("Select one or more files in File Explorer first.")
+            self.notify(f"Select one or more files in {FILE_MANAGER} first.")
             return
         action = b.get("action")
         if action == "repeat":
@@ -318,8 +440,11 @@ class Daemon(Controller):
         else:
             self.add_paths(paths, immediate=True)
 
-    def notify(self, text: str):
-        self.tray.showMessage(APP_NAME, text, QSystemTrayIcon.MessageIcon.Information, 2500)
+    def notify(self, text: str, ms: int = 2500):
+        if IS_MAC:
+            self._toast = Toast(text, max(ms, 3500))
+            return
+        self.tray.showMessage(APP_NAME, text, QSystemTrayIcon.MessageIcon.Information, ms)
 
     # ----------------------------------------------------------------- tray
 
@@ -336,8 +461,11 @@ class Daemon(Controller):
 
     def _update_tray(self):
         wheel = next((b for b, ok in self.binding_status if ok and b.get("action") == "wheel"), None)
-        hint = f"press {pretty_keys(wheel['keys'])}" if wheel else "right-click › Convert to…"
-        self.tray.setToolTip(f"{APP_NAME}\nSelect files in Explorer and {hint}")
+        if IS_MAC:
+            hint = f"press {pretty_keys(wheel['keys'])}" if wheel else "right-click › Quick Actions › Convert with ShapeShifter"
+        else:
+            hint = f"press {pretty_keys(wheel['keys'])}" if wheel else "right-click › Convert to…"
+        self.tray.setToolTip(f"{APP_NAME}\nSelect files in {FILE_MANAGER} and {hint}")
 
         menu = self._menu
         menu.clear()
@@ -348,6 +476,13 @@ class Daemon(Controller):
         a.setFont(f)
         menu.addAction("Convert files…").triggered.connect(self._pick_files)
         menu.addSeparator()
+        if IS_MAC and self.needs_accessibility:
+            acc = menu.addAction("Allow hotkeys (Accessibility)…")
+            acc.triggered.connect(self._open_accessibility)
+            af = acc.font()
+            af.setBold(True)
+            acc.setFont(af)
+            menu.addSeparator()
         if self.update_available:
             u = menu.addAction(f"Update to {self.update_available.version}…")
             u.triggered.connect(self.open_update)
@@ -365,7 +500,7 @@ class Daemon(Controller):
 
         orig = menu.addMenu("Original file after converting")
         group = QActionGroup(orig)
-        for key, label in (("recycle", "Move to Recycle Bin"), ("keep", "Keep it"),
+        for key, label in (("recycle", f"Move to {TRASH}"), ("keep", "Keep it"),
                            ("delete", "Delete permanently")):
             act = QAction(label, orig, checkable=True)
             act.setChecked(self.cfg["original"] == key)
@@ -435,11 +570,21 @@ class Daemon(Controller):
         if files:
             self.add_paths(files, immediate=True)
 
+    def _open_accessibility(self):
+        from .mac import appkit
+        appkit.accessibility_trusted(prompt=True)
+        appkit.open_pane("accessibility")
+        self.notify("Turn on ShapeShifter in Privacy & Security › Accessibility. The hotkeys start by themselves "
+                    "once it's on.", 8000)
+
     def _quit(self):
-        from .winutil import unregister_hotkey
-        for hid in list(self.bindings):
-            unregister_hotkey(self._hotkey_hwnd, hid)
-        self.mouse.stop()
+        if IS_MAC:
+            self.tap.stop()
+        else:
+            from .winutil import unregister_hotkey
+            for hid in list(self.bindings):
+                unregister_hotkey(self._hotkey_hwnd, hid)
+            self.mouse.stop()
         self.tray.hide()
         self.server.close()
         QApplication.quit()
@@ -460,11 +605,9 @@ def run_leader(paths: list[str], lock: ipc.LeaderLock, settings: bool = False) -
 
 
 def run_daemon(show_settings: bool = False) -> int:
-    import win32api
-    import win32event
-
-    singleton = win32event.CreateMutex(None, False, ipc.DAEMON_MUTEX_NAME)
-    if win32api.GetLastError() == ipc.ERROR_ALREADY_EXISTS:
+    singleton = ipc.NamedLock(ipc.DAEMON_MUTEX_NAME)
+    if not singleton.acquired:
+        singleton.release()
         log.info("Daemon already running")
         if show_settings:
             ipc.send_message({"cmd": "settings"}, timeout=5)
@@ -484,10 +627,30 @@ def run_daemon(show_settings: bool = False) -> int:
 
     app = _make_app()
     daemon = Daemon()
+    if IS_MAC:
+        show_settings = _first_run_mac() or show_settings
     if show_settings:
         QTimer.singleShot(0, daemon.open_settings)
     try:
         return app.exec()
     finally:
         lock.release()
-        win32api.CloseHandle(singleton)
+        singleton.release()
+
+
+def _first_run_mac() -> bool:
+    """The first time the app starts on a Mac: add the Finder Quick Action and start at login, and show
+    Settings (with the permissions to grant). Later starts refresh the Quick Action if the app moved."""
+    from .mac import integration
+    state = config.load_state()
+    first = not state.get("mac_setup_done")
+    try:
+        if first:
+            integration.install(startup=True)
+        elif integration.context_menu_registered():
+            integration.register_context_menu()                 # points at this copy of the app
+    except Exception:
+        log.exception("Setting up the Finder integration failed")
+    if first:
+        config.save_state(mac_setup_done=True)
+    return first

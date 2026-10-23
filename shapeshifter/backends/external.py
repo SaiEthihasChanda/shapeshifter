@@ -33,6 +33,8 @@ def soffice_path() -> str | None:
     for base in (os.environ.get("ProgramFiles"), os.environ.get("ProgramFiles(x86)")):
         if base:
             dirs.append(Path(base) / "LibreOffice" / "program")
+    dirs += [Path("/Applications/LibreOffice.app/Contents/MacOS"),
+             Path.home() / "Applications" / "LibreOffice.app" / "Contents" / "MacOS"]
     return find_exe("soffice", dirs)
 
 

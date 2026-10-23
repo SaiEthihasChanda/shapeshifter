@@ -9,7 +9,6 @@ from __future__ import annotations
 import copy
 import logging
 import math
-import os
 import sys
 import webbrowser
 from pathlib import Path
@@ -29,6 +28,7 @@ from PySide6.QtWidgets import (QAbstractItemView, QApplication, QButtonGroup, QC
 from . import APP_NAME, __version__, config, engine, themes
 from .formats import CATEGORIES, CATEGORY_COLORS, category
 from .wheel import WheelView
+from .system import FILE_MANAGER, IS_MAC, MODIFIER_HELP, SYSTEM, TRASH, bring_to_front, open_path
 
 log = logging.getLogger(__name__)
 
@@ -43,14 +43,13 @@ def show_settings(controller=None):
     global _window
     if _window is None:
         _window = SettingsWindow(controller)
+    if IS_MAC:
+        from .mac import appkit
+        appkit.set_dock_icon(True)                   # findable in the Dock and ⌘-Tab while it's open
     _window.showNormal()
     _window.raise_()
     _window.activateWindow()
-    try:
-        from .winutil import force_foreground
-        force_foreground(int(_window.winId()))
-    except Exception:
-        pass
+    bring_to_front(_window)
 
 
 # --------------------------------------------------------------------- helpers
@@ -106,6 +105,13 @@ def vk_name(vk: int) -> str | None:
 
 
 def hotkey_available(spec: str) -> bool:
+    if IS_MAC:
+        try:                                         # macOS can't say whether another app uses it
+            from .mac.events import parse_key
+            parse_key(spec)
+            return True
+        except ValueError:
+            return False
     import ctypes
     from .winutil import parse_hotkey
     try:
@@ -307,12 +313,12 @@ class GeneralPage(Page):
     def __init__(self, win):
         super().__init__(win)
         b = self.body
-        b.addWidget(heading("General", "What happens to files, conversion quality and Windows integration."))
+        b.addWidget(heading("General", f"What happens to files, conversion quality and {SYSTEM} integration."))
 
         g = QGroupBox("After a successful conversion, the original file…")
         lay = QVBoxLayout(g)
         self.orig = QButtonGroup(self)
-        for key, label in (("recycle", "Moves to the Recycle Bin (recommended — easy to undo)"),
+        for key, label in (("recycle", f"Moves to the {TRASH} (recommended — easy to undo)"),
                            ("keep", "Stays where it is (you get both files)"),
                            ("delete", "Is deleted permanently")):
             r = QRadioButton(label)
@@ -362,34 +368,76 @@ class GeneralPage(Page):
         detect.clicked.connect(self._detect_ocr_languages)
         rl.addWidget(detect)
         form.addRow("Language", row)
-        self.ocr_note = QLabel("Uses Windows' built-in OCR; add languages in Windows Settings › Time "
-                               "& language › Language & region. “Automatic” uses your Windows languages.")
+        self.ocr_note = QLabel(
+            "Uses the text recognition built into macOS. “Automatic” works out the language by itself." if IS_MAC else
+            "Uses Windows' built-in OCR; add languages in Windows Settings › Time "
+            "& language › Language & region. “Automatic” uses your Windows languages.")
         self.ocr_note.setWordWrap(True)
         self.ocr_note.setStyleSheet("color: palette(placeholder-text);")
         form.addRow(self.ocr_note)
         b.addWidget(g)
 
-        g = QGroupBox("Windows integration")
+        g = QGroupBox("Finder and Mac integration" if IS_MAC else "Windows integration")
         lay = QVBoxLayout(g)
-        from . import shell
-        st = QCheckBox("Start automatically when I sign in to Windows (needed for hotkeys)")
-        st.setChecked(shell.startup_enabled())
-        st.toggled.connect(shell.set_startup)
+        from . import integration
+        st = QCheckBox("Start automatically when I log in (needed for hotkeys)" if IS_MAC else
+                       "Start automatically when I sign in to Windows (needed for hotkeys)")
+        st.setChecked(integration.startup_enabled())
+        st.toggled.connect(integration.set_startup)
         lay.addWidget(st)
-        self.ctx = QCheckBox("Show “Convert to…” in File Explorer's right-click menu")
-        self.ctx.setChecked(shell.context_menu_registered())
+        self.ctx = QCheckBox("Show “Convert with ShapeShifter” in Finder's right-click menu" if IS_MAC else
+                             "Show “Convert to…” in File Explorer's right-click menu")
+        self.ctx.setChecked(integration.context_menu_registered())
         self.ctx.toggled.connect(self._toggle_ctx)
         lay.addWidget(self.ctx)
-        note = QLabel("On Windows 11 the entry is under “Show more options” (or Shift+right-click).")
+        note = QLabel("Right-click files in Finder › Quick Actions › Convert with ShapeShifter. If it's missing, turn "
+                      "it on in System Settings › General › Login Items & Extensions › Finder." if IS_MAC else
+                      "On Windows 11 the entry is under “Show more options” (or Shift+right-click).")
+        note.setWordWrap(True)
         note.setStyleSheet("color: palette(placeholder-text);")
         lay.addWidget(note)
         b.addWidget(g)
+        if IS_MAC:
+            b.addWidget(self._permissions())
         b.addStretch(1)
+
+    def _permissions(self) -> QGroupBox:
+        """macOS: the two permissions hotkeys need, with their state and a button to the right System Settings page."""
+        from .mac import appkit
+        g = QGroupBox("Permissions")
+        grid = QGridLayout(g)
+        self._acc = QLabel()
+        self._acc.setWordWrap(True)
+        grid.addWidget(self._acc, 0, 0)
+        b1 = QPushButton("Open Accessibility settings")
+        b1.clicked.connect(lambda: (appkit.accessibility_trusted(prompt=True), appkit.open_pane("accessibility")))
+        grid.addWidget(b1, 0, 1)
+        auto = QLabel("<b>Automation › Finder</b> — lets the hotkeys ask Finder which files are selected. macOS asks "
+                      "the first time you press one.")
+        auto.setWordWrap(True)
+        grid.addWidget(auto, 1, 0)
+        b2 = QPushButton("Open Automation settings")
+        b2.clicked.connect(lambda: appkit.open_pane("automation"))
+        grid.addWidget(b2, 1, 1)
+        grid.setColumnStretch(0, 1)
+        self._acc_timer = QTimer(self, interval=2000)
+        self._acc_timer.timeout.connect(self._show_accessibility)
+        self._acc_timer.start()
+        self._show_accessibility()
+        return g
+
+    def _show_accessibility(self):
+        from .mac import appkit
+        ok = appkit.accessibility_trusted()
+        self._acc.setText("<b>Accessibility</b> — " + (
+            "✓ on: hotkeys and mouse triggers work." if ok else
+            "<span style='color:#e5484d'>off</span>: hotkeys and mouse triggers need it. Turn on ShapeShifter in "
+            "Privacy & Security › Accessibility (after an update, switch it off and on again)."))
 
     def _fill_ocr_languages(self):
         self.ocr_lang.blockSignals(True)
         self.ocr_lang.clear()
-        self.ocr_lang.addItem("Automatic (Windows languages)", "auto")
+        self.ocr_lang.addItem("Automatic" if IS_MAC else "Automatic (Windows languages)", "auto")
         for tag, name in config.load_state().get("ocr_langs", []):
             self.ocr_lang.addItem(f"{name} ({tag})", tag)
         current = self.cfg.get("ocr_language", "auto")
@@ -421,11 +469,11 @@ class GeneralPage(Page):
         planner.reset()
 
     def _toggle_ctx(self, on: bool):
-        from . import shell
+        from . import integration
         if on:
-            shell.register_context_menu()
+            integration.register_context_menu()
         else:
-            shell.unregister_context_menu()
+            integration.unregister_context_menu()
 
 
 class HotkeyEdit(QLineEdit):
@@ -444,15 +492,18 @@ class HotkeyEdit(QLineEdit):
 
     @staticmethod
     def _mods(mods) -> list[str]:
+        # On a Mac Qt reports ⌘ Command as "Control" and ⌃ Control as "Meta".
+        ctrl, meta = (Qt.KeyboardModifier.MetaModifier, Qt.KeyboardModifier.ControlModifier) if IS_MAC else \
+            (Qt.KeyboardModifier.ControlModifier, Qt.KeyboardModifier.MetaModifier)
         parts = []
-        if mods & Qt.KeyboardModifier.ControlModifier:
+        if mods & ctrl:
             parts.append("ctrl")
         if mods & Qt.KeyboardModifier.AltModifier:
             parts.append("alt")
         if mods & Qt.KeyboardModifier.ShiftModifier:
             parts.append("shift")
-        if mods & Qt.KeyboardModifier.MetaModifier:
-            parts.append("win")
+        if mods & meta:
+            parts.append("cmd" if IS_MAC else "win")
         return parts
 
     def _set_spec(self, spec: str):
@@ -472,7 +523,7 @@ class HotkeyEdit(QLineEdit):
             super().mousePressEvent(e)
             self.setFocus()
             if name == "right":
-                self.setText("Hold Ctrl, Alt, Shift or Win with left/right click")
+                self.setText(f"Hold {MODIFIER_HELP} with left/right click")
             return
         if name:
             self.setFocus()
@@ -488,7 +539,7 @@ class HotkeyEdit(QLineEdit):
     def wheelEvent(self, e):
         parts = self._mods(e.modifiers())
         if not parts:
-            self.setText("Hold Ctrl, Alt, Shift or Win while scrolling")
+            self.setText(f"Hold {MODIFIER_HELP} while scrolling")
             e.accept()
             return
         delta = e.angleDelta().y() or e.angleDelta().x()  # Alt+wheel reports horizontally
@@ -499,6 +550,8 @@ class HotkeyEdit(QLineEdit):
     def keyPressEvent(self, e):
         vk = e.nativeVirtualKey()
         parts = self._mods(e.modifiers())
+        if IS_MAC:                                   # native key codes differ: name the key from Qt's key
+            return self._mac_key(e, parts)
         if vk in MODIFIER_VKS:
             self.setText(_pretty("+".join(parts)) + "+…")
             return
@@ -514,11 +567,44 @@ class HotkeyEdit(QLineEdit):
         if not name:
             return
         if not parts and not name.startswith("f"):
-            self.setText("Add Ctrl, Alt, Shift or Win")
+            self.setText(f"Add {MODIFIER_HELP}")
             return
         self.spec = "+".join(parts + [name])
         self.setText(_pretty(self.spec))
         self.changed.emit(self.spec)
+
+    def _mac_key(self, e, parts):
+        from .mac.events import KEYCODES
+        k = e.key()
+        if k in (Qt.Key.Key_Control, Qt.Key.Key_Meta, Qt.Key.Key_Alt, Qt.Key.Key_Shift):
+            self.setText(_pretty("+".join(parts)) + "…")
+            return
+        if not parts and k in (Qt.Key.Key_Backspace, Qt.Key.Key_Delete):
+            self.spec = ""
+            self.setText("")
+            self.changed.emit("")
+            return
+        if not parts and k in (Qt.Key.Key_Escape, Qt.Key.Key_Return, Qt.Key.Key_Enter):
+            e.ignore()
+            return
+        name = None
+        if Qt.Key.Key_A <= k <= Qt.Key.Key_Z or Qt.Key.Key_0 <= k <= Qt.Key.Key_9:
+            name = chr(k).lower()
+        elif Qt.Key.Key_F1 <= k <= Qt.Key.Key_F20:
+            name = f"f{k - Qt.Key.Key_F1 + 1}"
+        else:
+            name = {Qt.Key.Key_Space: "space", Qt.Key.Key_Tab: "tab", Qt.Key.Key_Home: "home", Qt.Key.Key_End: "end",
+                    Qt.Key.Key_PageUp: "pageup", Qt.Key.Key_PageDown: "pagedown", Qt.Key.Key_Left: "left",
+                    Qt.Key.Key_Right: "right", Qt.Key.Key_Up: "up", Qt.Key.Key_Down: "down",
+                    Qt.Key.Key_Delete: "delete", Qt.Key.Key_Return: "enter"}.get(k)
+            if name is None and e.text() and e.text().strip() in KEYCODES:
+                name = e.text().strip()
+        if not name:
+            return
+        if not parts and not name.startswith("f"):
+            self.setText(f"Add {MODIFIER_HELP}")
+            return
+        self._set_spec("+".join(parts + [name]))
 
     def keyReleaseEvent(self, e):
         if self.text().endswith("…") or self.text().startswith(("Add ", "Hold ")):
@@ -573,13 +659,14 @@ class HotkeyDialog(QDialog):
         spec = self.keys.spec
         ok = bool(spec)
         if not spec:
-            msg = "Click the box above, then press keys — or middle-click / side-button / Ctrl+scroll on it."
+            msg = ("Click the box above, then press keys — or middle-click / side-button / "
+                   + ("⌃+scroll" if IS_MAC else "Ctrl+scroll") + " on it.")
         elif spec in self.others:
             msg, ok = "⚠ Already used by another binding.", False
         elif is_mouse_spec(spec):
             try:
                 parse_mouse_spec(spec)
-                msg = ("✓ Mouse trigger — works over File Explorer and the desktop; "
+                msg = (f"✓ Mouse trigger — works over {FILE_MANAGER} and the desktop; "
                        "other apps keep their normal behaviour.")
             except ValueError as e:
                 msg, ok = f"⚠ {e}", False
@@ -601,7 +688,7 @@ class HotkeysPage(Page):
     def __init__(self, win):
         super().__init__(win)
         b = self.body
-        b.addWidget(heading("Hotkeys", "Select files in File Explorer (or on the desktop), then press "
+        b.addWidget(heading("Hotkeys", f"Select files in {FILE_MANAGER} (or on the desktop), then press "
                                        "a shortcut. Shortcuts can be key combinations or mouse "
                                        "buttons — e.g. middle-click a file to open the wheel for it. "
                                        "Double-click a row to change it."))
@@ -1004,7 +1091,7 @@ class FormatsPage(Page):
         self.custom_list = QListWidget()
         self.custom_list.setMaximumHeight(120)
         self.custom_list.itemDoubleClicked.connect(
-            lambda it: os.startfile(it.data(Qt.ItemDataRole.UserRole)))
+            lambda it: open_path(it.data(Qt.ItemDataRole.UserRole)))
         gl.addWidget(self.custom_list)
         row = QHBoxLayout()
         for text, fn in (("New description…", self._new_custom), ("Open folder", self._open_custom),
@@ -1089,13 +1176,13 @@ class FormatsPage(Page):
 
     def _new_custom(self):
         from . import custom
-        os.startfile(custom.create_template())
+        open_path(custom.create_template())
         self._fill_custom()
 
     def _open_custom(self):
         from . import custom
         custom.FORMATS_DIR.mkdir(parents=True, exist_ok=True)
-        os.startfile(custom.FORMATS_DIR)
+        open_path(custom.FORMATS_DIR)
 
     def _reload_custom(self):
         from . import custom
@@ -1213,7 +1300,10 @@ ENGINE_INFO = {
     "mupdf": ("PyMuPDF", "PDF, SVG and e-books (EPUB, MOBI, XPS, CBZ)", None, None),
     "data": ("Built-in data converter", "CSV, TSV, XLSX, JSON, YAML, TOML, SQLite databases",
              None, None),
-    "ocr": ("Text recognition (Windows OCR)",
+    "ocr": ("Text recognition (macOS Vision)",
+            "Reads text from scans and photos: image → text, Markdown, HTML, Word or searchable "
+            "PDF, and scanned PDFs → text or searchable PDF. Built into macOS.", None, None) if IS_MAC else
+           ("Text recognition (Windows OCR)",
             "Reads text from scans and photos: image → text, Markdown, HTML, Word or searchable "
             "PDF, and scanned PDFs → text or searchable PDF. Built into Windows 10/11; needs at "
             "least one OCR language (Settings › Time & language › Language & region).",
@@ -1242,7 +1332,7 @@ ENGINE_INFO = {
     "sevenzip": ("7-Zip", "RAR / CBR, ISO, CAB, WIM, DMG, VHD(X), VMDK, QCOW2, SquashFS, RPM, CPIO, XAR and CHM archives: "
                  "extract them or re-pack as ZIP / 7z / TAR", "7zip.7zip", "https://www.7-zip.org"),
     "tables": ("Built-in table reader", "Finds tables in PDFs, Word and OpenDocument files, web pages, Markdown, slides and "
-               "pictures (with Windows OCR) and writes them as spreadsheets, CSV, JSON or documents", None, None),
+               "pictures (with text recognition) and writes them as spreadsheets, CSV, JSON or documents", None, None),
     "slides": ("Built-in presentations", "PowerPoint (PPTX, and old PPT text) and OpenDocument (ODP) presentations: read, draw "
                "to PDF, turn into outlines, and write PPTX / ODP from PDFs, pictures and documents", None, None),
     "docread": ("Built-in Word / OpenDocument / RTF", "Reads and writes DOCX, ODT and RTF (and reads old .doc) without "
@@ -1251,6 +1341,20 @@ ENGINE_INFO = {
     "raw": ("Camera RAW previews", "CR2, NEF, ARW, DNG, ORF, RW2, RAF: takes the full-size JPEG the camera stored in the file",
             None, None),
 }
+
+
+# winget id -> Homebrew package, for the Install buttons on a Mac
+BREW = {"Gyan.FFmpeg": "brew:ffmpeg", "JohnMacFarlane.Pandoc": "brew:pandoc",
+        "TheDocumentFoundation.LibreOffice": "brew:--cask libreoffice", "7zip.7zip": "brew:sevenzip"}
+
+
+def _brew() -> str | None:
+    """Homebrew's brew command, if it is installed (an app started from Finder doesn't have it on PATH)."""
+    import shutil
+    for c in (shutil.which("brew"), "/opt/homebrew/bin/brew", "/usr/local/bin/brew"):
+        if c and Path(c).is_file():
+            return c
+    return None
 
 
 class EnginesPage(Page):
@@ -1320,10 +1424,14 @@ class EnginesPage(Page):
                 pl.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
                 text.addWidget(pl)
             lay.addLayout(text, 1)
-            from .shell import FROZEN
-            if not ok and winget and winget.startswith("pip:") and FROZEN:
+            frozen = bool(getattr(sys, "frozen", False))
+            if IS_MAC and winget and not winget.startswith("pip:"):
+                winget = BREW.get(winget) if _brew() else None
+            if not ok and winget and winget.startswith("pip:") and frozen:
                 d.setText(desc + " (Not available in the packaged app — install ShapeShifter "
-                                 "with install.ps1 to use it.)")
+                                 + ("from source" if IS_MAC else "with install.ps1") + " to use it.)")
+            elif not ok and IS_MAC and name in paths and not _brew():
+                d.setText(desc + " Install it with Homebrew (brew.sh), or from its website.")
             elif not ok and winget:
                 btn = QPushButton("Install")
                 btn.clicked.connect(lambda _=False, w=winget, n=title: self._install(w, n))
@@ -1335,7 +1443,7 @@ class EnginesPage(Page):
             self.list.addWidget(card)
 
     def _install(self, package: str, name: str):
-        """``package``: a winget id, or 'pip:<name>' for a Python package."""
+        """``package``: a winget id, 'brew:<formula>' (macOS), or 'pip:<name>' for a Python package."""
         import sys
         from pathlib import Path
         if package.startswith("pip:"):
@@ -1343,6 +1451,8 @@ class EnginesPage(Page):
             py = exe.with_name("python.exe") if exe.name.lower() == "pythonw.exe" else exe
             program, args = str(py), ["-m", "pip", "install", "--disable-pip-version-check",
                                       package[4:]]
+        elif package.startswith("brew:"):
+            program, args = _brew(), ["install", *package[5:].split()]
         else:
             program, args = "winget", ["install", "--id", package, "--silent",
                                        "--accept-package-agreements", "--accept-source-agreements"]
@@ -1376,7 +1486,7 @@ class EnginesPage(Page):
         dlg.exec()
 
     def _test_ocr(self, label: QLabel):
-        """Run a real recognition on a generated sample and report what Windows found."""
+        """Run a real recognition on a generated sample and report what the system found."""
         import tempfile
         from pathlib import Path
         from PySide6.QtGui import QCursor
@@ -1390,12 +1500,12 @@ class EnginesPage(Page):
                 return
             sample = ""
             try:
-                from PIL import Image, ImageDraw, ImageFont
+                from PIL import Image, ImageDraw
                 with tempfile.TemporaryDirectory() as tmp:
                     im = Image.new("RGB", (900, 160), "white")
+                    from .forms import find_font
                     ImageDraw.Draw(im).text((30, 40), "ShapeShifter OCR test 12345",
-                                            font=ImageFont.truetype(r"C:\Windows\Fonts\arial.ttf", 56),
-                                            fill="black")
+                                            font=find_font("Typed", 56), fill="black")
                     p = Path(tmp) / "t.png"
                     im.save(p)
                     page, _ = ocr.recognize_file(p, self.win.cfg)
@@ -1410,9 +1520,9 @@ class EnginesPage(Page):
     def _redetect(self):
         config.save_state(ocr_ok=None)             # let OCR be re-checked
         engine.reset()
-        from . import shell
-        if shell.context_menu_registered():
-            shell.register_context_menu()
+        from . import integration
+        if integration.context_menu_registered():
+            integration.register_context_menu()
         self.win.refresh_all()
 
 
@@ -1422,7 +1532,7 @@ class AboutPage(Page):
         b = self.body
         b.addWidget(heading(APP_NAME, f"Version {__version__}"))
         from . import COPYRIGHT, LICENSE_NAME, SOURCE_URL
-        info = QLabel("Convert files in place from File Explorer with a radial wheel.\n\n"
+        info = QLabel(f"Convert files in place from {FILE_MANAGER} with a radial wheel.\n\n"
                       f"{COPYRIGHT}\nLicence: {LICENSE_NAME}\nSource code: {SOURCE_URL}\n\n"
                       f"Settings file: {config.CONFIG_FILE}\nLog file: {config.LOG_FILE}")
         info.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
@@ -1431,11 +1541,12 @@ class AboutPage(Page):
         app_dir = Path(sys.executable).parent
 
         def open_doc(name):
-            p = app_dir / name
-            os.startfile(p if p.exists() else SOURCE_URL)
+            # Windows: next to ShapeShifter.exe; macOS: ShapeShifter.app/Contents/Resources
+            p = next((d / name for d in (app_dir, app_dir.parent / "Resources") if (d / name).exists()), None)
+            open_path(p or SOURCE_URL)
 
         legal = QHBoxLayout()
-        for text, fn in (("Source code", lambda: os.startfile(SOURCE_URL)),
+        for text, fn in (("Source code", lambda: open_path(SOURCE_URL)),
                          ("Licence", lambda: open_doc("LICENSE.txt")),
                          ("Third-party notices", lambda: open_doc("THIRD-PARTY-NOTICES.txt"))):
             btn = QPushButton(text)
@@ -1454,9 +1565,12 @@ class AboutPage(Page):
         upd.addStretch(1)
         b.addLayout(upd)
         row = QHBoxLayout()
-        for text, fn in (("Open settings file", lambda: os.startfile(config.CONFIG_FILE)),
-                         ("Open log", lambda: config.LOG_FILE.exists() and os.startfile(config.LOG_FILE)),
-                         ("Reset all settings", self._reset)):
+        actions = [("Open settings file", lambda: open_path(config.CONFIG_FILE)),
+                   ("Open log", lambda: config.LOG_FILE.exists() and open_path(config.LOG_FILE)),
+                   ("Reset all settings", self._reset)]
+        if IS_MAC and getattr(sys, "frozen", False):
+            actions.append(("Uninstall ShapeShifter…", self._uninstall_mac))
+        for text, fn in actions:
             btn = QPushButton(text)
             btn.clicked.connect(fn)
             row.addWidget(btn)
@@ -1467,6 +1581,17 @@ class AboutPage(Page):
     def _check_updates(self):
         from .updates_dialog import show_update_dialog
         show_update_dialog()
+
+    def _uninstall_mac(self):
+        answer = QMessageBox.question(
+            self, "Uninstall ShapeShifter",
+            "Remove ShapeShifter from this Mac?\n\nThe Finder Quick Action, start at login and your settings are "
+            "removed, and the app goes to the Trash.")
+        if answer != QMessageBox.StandardButton.Yes:
+            return
+        from . import integration
+        integration.uninstall_everything()
+        QApplication.quit()
 
     def _reset(self):
         if QMessageBox.question(self, APP_NAME, "Reset every setting (including hotkeys) to the defaults?") \
@@ -1563,6 +1688,9 @@ class SettingsWindow(QWidget):
         _window = None
         self.deleteLater()
         super().closeEvent(e)
+        if IS_MAC:
+            from .mac import appkit
+            appkit.set_dock_icon(False)              # back to a menu-bar app
         ctl = self.controller
         if ctl is not None and hasattr(ctl, "_maybe_quit"):
             QTimer.singleShot(0, ctl._maybe_quit)

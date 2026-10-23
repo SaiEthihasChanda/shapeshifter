@@ -30,10 +30,11 @@ BLANK_DARK = 185                # ...where lighter grey counts as ink, so faint 
 MAX_LABEL_CHARS = 48
 SIGN_WORDS = re.compile(r"\b(signature|signed|sign here|sign)\b", re.I)
 MAX_LABEL_WORDS = 7
-FONTS = {                       # label -> candidate files, first one that exists wins
-    "Typed": ["arial.ttf", "segoeui.ttf", "DejaVuSans.ttf"],
-    "Handwriting": ["segoesc.ttf", "Inkfree.ttf", "BRUSHSCI.TTF", "arial.ttf"],
-    "Typewriter": ["cour.ttf", "consola.ttf", "arial.ttf"],
+FONTS = {                       # label -> candidate files (Windows, then macOS), first one that exists wins
+    "Typed": ["arial.ttf", "segoeui.ttf", "Arial.ttf", "Helvetica.ttc", "DejaVuSans.ttf"],
+    "Handwriting": ["segoesc.ttf", "Inkfree.ttf", "BRUSHSCI.TTF", "Bradley Hand Bold.ttf", "Noteworthy.ttc",
+                    "Chalkboard.ttc", "arial.ttf", "Arial.ttf"],
+    "Typewriter": ["cour.ttf", "consola.ttf", "Courier New.ttf", "Courier.ttc", "Menlo.ttc", "arial.ttf"],
 }
 INKS = {"Blue": (28, 52, 148), "Black": (20, 20, 20), "Red": (170, 30, 30)}
 
@@ -811,21 +812,59 @@ def detect_document(path, cfg: dict | None = None, cancel=None, progress=None):
 # ---------------------------------------------------------------- rendering
 
 FONT_DIR = Path(os.environ.get("WINDIR", r"C:\Windows")) / "Fonts"
+REGULAR_STYLES = {"regular", "roman", "book", "normal", "plain", "medium"}
 _STYLE_WORDS = re.compile(r"\b(bold|italic|oblique|light|semibold|semilight|semi|black|thin|medium|"
                           r"condensed|narrow|demi|demibold|heavy|extra|ultra|extralight|extrabold)\b", re.I)
 _installed: dict[str, str] | None = None
 
 
+def _font_files() -> dict[str, str]:
+    """macOS (and other systems without a font registry): read the family name out of every font file in the
+    font folders, keeping each family's regular style. Cached in the data folder; rebuilt when a folder changes."""
+    import json
+    from PIL import ImageFont
+    from .config import DATA_DIR
+    from .system import font_dirs
+    dirs = [d for d in font_dirs() if d.is_dir()]
+    stamp = [[str(d), d.stat().st_mtime] for d in dirs]
+    cache = DATA_DIR / "fonts.json"
+    try:
+        data = json.loads(cache.read_text(encoding="utf-8"))
+        if data.get("stamp") == stamp:
+            return data["fonts"]
+    except (OSError, ValueError, KeyError):
+        pass
+    found: dict[str, str] = {}
+    for d in dirs:
+        for f in sorted(d.iterdir()):
+            if f.suffix.lower() not in (".ttf", ".otf", ".ttc"):
+                continue
+            try:
+                family, style = ImageFont.truetype(str(f), 12).getname()
+            except Exception:                        # noqa: BLE001 - unreadable or bitmap-only fonts
+                continue
+            if not family or family.startswith(".") or (style or "").lower() not in REGULAR_STYLES:
+                continue
+            found.setdefault(family, str(f))
+    try:
+        DATA_DIR.mkdir(parents=True, exist_ok=True)
+        cache.write_text(json.dumps({"stamp": stamp, "fonts": found}), encoding="utf-8")
+    except OSError:
+        pass
+    return found
+
+
 def installed_fonts() -> dict[str, str]:
-    """Every font installed in Windows (its regular style): display name -> font file."""
+    """Every font installed (its regular style): display name -> font file."""
     global _installed
     if _installed is not None:
         return _installed
     found: dict[str, str] = {}
     try:
         import winreg
-    except ImportError:                              # not Windows: only the built-in styles
+    except ImportError:                              # not Windows: read the font folders
         winreg = None
+        found = _font_files()
     if winreg is not None:
         for hive in (winreg.HKEY_LOCAL_MACHINE, winreg.HKEY_CURRENT_USER):
             try:
@@ -865,9 +904,11 @@ def _truetype(path: str, px: int):
 def find_font(style: str, size: float):
     """A writing style ("Typed", "Handwriting", "Typewriter") or any installed font, at ``size`` pixels."""
     from PIL import ImageFont
+    from .system import font_dirs
     px = max(6, int(round(size)))
-    paths = [FONT_DIR / n for n in FONTS[style]] if style in FONTS else \
-        [Path(p) for p in [installed_fonts().get(style)] if p] + [FONT_DIR / n for n in FONTS["Typed"]]
+    dirs = font_dirs()
+    styled = [d / n for n in FONTS[style if style in FONTS else "Typed"] for d in dirs]
+    paths = styled if style in FONTS else [Path(p) for p in [installed_fonts().get(style)] if p] + styled
     for p in paths:
         if p.exists():
             try:

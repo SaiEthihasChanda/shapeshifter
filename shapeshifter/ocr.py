@@ -1,9 +1,10 @@
-"""Text recognition (OCR) with the recogniser built into Windows 10/11 (Windows.Media.Ocr).
+"""Text recognition (OCR) with the recogniser built into the system: Windows.Media.Ocr on Windows 10/11,
+Apple's Vision framework on macOS (see mac/vision.py).
 
-Nothing to install or bundle: a short PowerShell script (run by Windows PowerShell 5.1,
+Nothing to install or bundle. On Windows a short PowerShell script (run by Windows PowerShell 5.1,
 which can call the WinRT API) reads images and reports lines and word boxes as JSON. OCR
 languages are the ones installed in Windows (Settings > Time & language > Language &
-region); "auto" uses the user's profile languages.
+region); "auto" uses the user's profile languages. On a Mac every language Vision knows is available.
 """
 
 from __future__ import annotations
@@ -226,7 +227,13 @@ def _powershell() -> str | None:
 
 def available() -> bool:
     """Cheap check (no process spawned): Windows 10+, PowerShell present, and OCR hasn't been
-    found unusable (no language) on this PC."""
+    found unusable (no language) on this PC; or a Mac (Vision is part of macOS 10.15 and later)."""
+    if sys.platform == "darwin":
+        try:
+            import Vision  # noqa: F401
+            return True
+        except ImportError:
+            return False
     if sys.platform != "win32" or not _powershell():
         return False
     try:
@@ -262,6 +269,15 @@ def status() -> dict:
     """Probe Windows OCR: {'ok', 'languages': [(tag, name)], 'profile_ok', 'error'}.
     Also records the result so the wheel hides/shows OCR options accordingly."""
     info = {"ok": False, "languages": [], "profile_ok": False, "error": ""}
+    if sys.platform == "darwin":
+        try:
+            from .mac import vision
+            langs = vision.languages()
+            info.update(languages=langs, profile_ok=True, ok=bool(langs))
+        except Exception as e:
+            info["error"] = str(e)
+        config.save_state(ocr_ok=bool(info["ok"]))
+        return info
     try:
         data = _run("langs", {}, 60)
         langs = [(d["tag"], d["name"]) for d in _as_list(data.get("languages"))]
@@ -311,6 +327,16 @@ def recognize(images: list[Path], cfg: dict | None = None, cancel=None,
     cfg = cfg or {}
     lang = str(cfg.get("ocr_language", "auto") or "auto")
     pages: list[Page] = []
+    if sys.platform == "darwin":
+        from .mac import vision
+        for i, p in enumerate(images):
+            if cancel is not None and cancel.is_set():
+                from .core import Cancelled
+                raise Cancelled()
+            pages.append(vision.recognize_path(p, lang))
+            if progress:
+                progress((i + 1) / len(images))
+        return pages
     batch = 6                                         # a few per PowerShell start-up
     with tempfile.TemporaryDirectory(prefix="ss-ocr-in-") as tmp:
         for start in range(0, len(images), batch):

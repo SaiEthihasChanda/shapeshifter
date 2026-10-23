@@ -3,6 +3,9 @@
 Nothing is sent except an ordinary request for the public "latest release" page. The installer is checked against the
 SHA-256 GitHub publishes for it before it is run, and it is the same per-user installer people download by hand: it
 closes the running app, upgrades in place and starts it again.
+
+On a Mac the download is the same .dmg people download by hand; a small script waits for ShapeShifter to quit,
+replaces ShapeShifter.app with the one in the .dmg and starts it again.
 """
 
 from __future__ import annotations
@@ -13,6 +16,7 @@ import logging
 import os
 import re
 import subprocess
+import sys
 import tempfile
 import time
 import urllib.request
@@ -26,7 +30,9 @@ log = logging.getLogger(__name__)
 REPO = "SaiEthihasChanda/shapeshifter"
 API = f"https://api.github.com/repos/{REPO}/releases/latest"
 PAGE = f"https://github.com/{REPO}/releases/latest"
-ASSET = "ShapeShifter-Setup.exe"
+ASSET_WINDOWS = "ShapeShifter-Setup.exe"
+ASSET_MAC = "ShapeShifter-macOS.dmg"
+ASSET = ASSET_MAC if sys.platform == "darwin" else ASSET_WINDOWS
 CHECK_EVERY = 24 * 3600
 
 
@@ -116,7 +122,7 @@ def download(up: Update, progress=None, cancelled=lambda: False) -> Path:
     if not up.url.startswith("https://github.com/"):
         raise UpdateError("The update isn't hosted where expected, so it was not downloaded.")
     folder = Path(tempfile.mkdtemp(prefix="shapeshifter-update-"))
-    dest = folder / f"ShapeShifter-Setup-{up.version}.exe"
+    dest = folder / (f"ShapeShifter-{up.version}.dmg" if sys.platform == "darwin" else f"ShapeShifter-Setup-{up.version}.exe")
     h = hashlib.sha256()
     try:
         with _open(up.url, timeout=60) as r, open(dest, "wb") as f:
@@ -156,8 +162,45 @@ def _cleanup(path: Path) -> None:
         pass
 
 
+MAC_SWAP = r"""#!/bin/sh
+# ShapeShifter update: wait for the app to quit, replace it with the copy in the .dmg, start it again.
+pid="$1"; dmg="$2"; app="$3"
+i=0
+while kill -0 "$pid" 2>/dev/null && [ $i -lt 150 ]; do sleep 0.2; i=$((i+1)); done
+mnt=$(mktemp -d /tmp/shapeshifter-update.XXXXXX)
+hdiutil attach -nobrowse -readonly -noautoopen -mountpoint "$mnt" "$dmg" >/dev/null || { open "$app"; exit 1; }
+new="$mnt/ShapeShifter.app"
+if [ -d "$new" ]; then
+    rm -rf "$app.updating"
+    if ditto "$new" "$app.updating"; then
+        rm -rf "$app" && mv "$app.updating" "$app"
+    fi
+fi
+hdiutil detach "$mnt" -quiet || hdiutil detach "$mnt" -force -quiet
+rmdir "$mnt" 2>/dev/null
+xattr -dr com.apple.quarantine "$app" 2>/dev/null
+rm -f "$dmg"
+open "$app"
+"""
+
+
 def install(installer: Path) -> None:
-    """Run the installer and return at once; it closes this app, upgrades it and starts the new one."""
+    """Run the installer and return at once; it closes this app, upgrades it and starts the new one.
+    On a Mac the caller quits the app right after this returns; the swap script waits for that."""
+    if sys.platform == "darwin":
+        from .mac.appkit import app_bundle
+        bundle = app_bundle()
+        if bundle is None:
+            raise UpdateError("This copy of ShapeShifter isn't an installed app, so it can't update itself.")
+        script = installer.with_name("update.sh")
+        script.write_text(MAC_SWAP, encoding="utf-8")
+        try:
+            subprocess.Popen(["/bin/sh", str(script), str(os.getpid()), str(installer), str(bundle)],
+                             start_new_session=True, close_fds=True, cwd=str(installer.parent),
+                             stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        except OSError as e:
+            raise UpdateError(f"Couldn't start the update: {e}") from e
+        return
     flags = getattr(subprocess, "DETACHED_PROCESS", 0) | getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0)
     try:
         subprocess.Popen([str(installer), "/SILENT", "/SUPPRESSMSGBOXES", "/NORESTART"], creationflags=flags, close_fds=True,
@@ -168,5 +211,10 @@ def install(installer: Path) -> None:
 
 def installed_per_user() -> bool:
     """Updating in place only makes sense for the installed app, not a source checkout."""
-    import sys
-    return bool(getattr(sys, "frozen", False)) and os.path.exists(Path(sys.executable).parent / "unins000.exe")
+    if not getattr(sys, "frozen", False):
+        return False
+    if sys.platform == "darwin":
+        from .mac.appkit import app_bundle
+        bundle = app_bundle()
+        return bundle is not None and os.access(bundle.parent, os.W_OK) and "/AppTranslocation/" not in str(bundle)
+    return os.path.exists(Path(sys.executable).parent / "unins000.exe")

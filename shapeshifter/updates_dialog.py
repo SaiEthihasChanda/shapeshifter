@@ -3,12 +3,13 @@
 from __future__ import annotations
 
 import logging
-import os
+import sys
 
 from PySide6.QtCore import Qt, QThread, Signal
 from PySide6.QtWidgets import QDialog, QHBoxLayout, QLabel, QPlainTextEdit, QProgressBar, QPushButton, QVBoxLayout
 
 from . import __version__, updates
+from .system import open_path
 
 log = logging.getLogger(__name__)
 _open: list[QDialog] = []
@@ -93,7 +94,7 @@ class UpdateDialog(QDialog):
         self.skip_btn = QPushButton("Skip this version")
         self.skip_btn.clicked.connect(self._skip)
         self.page_btn = QPushButton("Release notes")
-        self.page_btn.clicked.connect(lambda: os.startfile(self.up.page if self.up else updates.PAGE))
+        self.page_btn.clicked.connect(lambda: open_path(self.up.page if self.up else updates.PAGE))
         self.close_btn = QPushButton("Close")
         self.close_btn.clicked.connect(self.close)
         self.go = QPushButton("Update now")
@@ -157,7 +158,7 @@ class UpdateDialog(QDialog):
         if not self.up:
             return
         if not updates.installed_per_user():
-            os.startfile(self.up.page)
+            open_path(self.up.page)
             return
         self.go.setEnabled(False)
         self.skip_btn.setEnabled(False)
@@ -188,6 +189,10 @@ class UpdateDialog(QDialog):
             return
         self.go.hide()
         self.skip_btn.hide()
+        if sys.platform == "darwin":                 # the swap script waits for this app to quit
+            from PySide6.QtCore import QTimer
+            from PySide6.QtWidgets import QApplication
+            QTimer.singleShot(600, QApplication.instance().quit)
 
     def closeEvent(self, event):
         if self.downloader and self.downloader.isRunning():

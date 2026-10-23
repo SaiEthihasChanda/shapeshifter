@@ -535,8 +535,5 @@ def _run_step(edge, cur: Path, dst: Path, ctx: Context) -> list[Path]:
 
 
 def _hide(path: Path) -> None:
-    try:
-        import ctypes
-        ctypes.windll.kernel32.SetFileAttributesW(str(path), 0x02)  # FILE_ATTRIBUTE_HIDDEN
-    except Exception:
-        pass
+    from .system import set_hidden
+    set_hidden(path)

@@ -34,9 +34,7 @@ GA_ROOT = 2
 
 EXPLORER_CLASSES = {"CabinetWClass", "ExploreWClass", "Progman", "WorkerW"}
 
-BUTTONS = {"left", "right", "middle", "x1", "x2"}
-WHEEL = {"up", "down"}
-MOD_FLAGS = {"ctrl": 1, "alt": 2, "shift": 4, "win": 8}
+from .triggers import BUTTONS, MOD_FLAGS, WHEEL, is_mouse_spec, parse_mouse_spec  # noqa: E402,F401 - shared parsing
 
 
 class MSLLHOOKSTRUCT(ctypes.Structure):
@@ -59,31 +57,6 @@ user32.GetClassNameW.argtypes = [wintypes.HWND, wintypes.LPWSTR, ctypes.c_int]
 user32.GetAsyncKeyState.restype = ctypes.c_short
 user32.GetMessageW.argtypes = [ctypes.POINTER(wintypes.MSG), wintypes.HWND, wintypes.UINT, wintypes.UINT]
 user32.PostThreadMessageW.argtypes = [wintypes.DWORD, wintypes.UINT, wintypes.WPARAM, wintypes.LPARAM]
-
-
-def is_mouse_spec(spec: str) -> bool:
-    last = spec.rsplit("+", 1)[-1]
-    return last.startswith("mouse:") or last.startswith("wheel:")
-
-
-def parse_mouse_spec(spec: str) -> tuple[int, str]:
-    """'ctrl+mouse:middle' -> (modifier flags, 'middle'); 'alt+wheel:up' -> (2, 'wheel:up')."""
-    parts = [p.strip().lower() for p in spec.split("+") if p.strip()]
-    mods = 0
-    for p in parts[:-1]:
-        if p not in MOD_FLAGS:
-            raise ValueError(f"Unknown modifier '{p}' in '{spec}'")
-        mods |= MOD_FLAGS[p]
-    kind, _, name = parts[-1].partition(":")
-    if kind == "mouse" and name in BUTTONS:
-        if name in ("left", "right") and not mods:
-            raise ValueError("Left/right click need a modifier (Ctrl, Alt, Shift or Win)")
-        return mods, name
-    if kind == "wheel" and name in WHEEL:
-        if not mods:
-            raise ValueError("Scrolling needs a modifier (Ctrl, Alt, Shift or Win)")
-        return mods, f"wheel:{name}"
-    raise ValueError(f"Unknown mouse input '{parts[-1]}'")
 
 
 def _current_mods() -> int:

@@ -8,6 +8,7 @@ format added to any backend automatically gains every conversion that follows fr
 from __future__ import annotations
 
 import logging
+import sys
 from dataclasses import dataclass, field
 from functools import lru_cache
 
@@ -204,7 +205,7 @@ class TargetOption:
 
 ENGINE_NAMES = {"images": "Pillow", "mupdf": "PyMuPDF", "ffmpeg": "ffmpeg", "data": "built-in",
                 "archives": "built-in", "pandoc": "pandoc", "libreoffice": "LibreOffice",
-                "native": "native", "custom": "custom format", "ocr": "Windows OCR",
+                "native": "native", "custom": "custom format", "ocr": "macOS text recognition" if sys.platform == "darwin" else "Windows OCR",
                 "picturedoc": "built-in", "tables": "built-in tables", "slides": "built-in slides",
                 "docread": "built-in", "raw": "built-in RAW preview", "sevenzip": "7-Zip"}
 

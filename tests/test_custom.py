@@ -120,6 +120,7 @@ def test_ambiguous_file_asks_first(tmp_path):
 
 # ------------------------------------------------------------------ migration
 
+@pytest.mark.skipif(sys.platform != "win32", reason="Windows registry migration")
 def test_legacy_settings_migrate(tmp_path, monkeypatch):
     from shapeshifter import shell
     appdata, local = tmp_path / "Roaming", tmp_path / "Local"

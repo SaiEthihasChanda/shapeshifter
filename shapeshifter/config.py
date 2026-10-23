@@ -1,4 +1,5 @@
-"""User configuration stored in %APPDATA%\\ShapeShifter\\config.json."""
+"""User configuration stored in %APPDATA%\\ShapeShifter\\config.json (Windows) or
+~/Library/Application Support/ShapeShifter/config.json (macOS)."""
 
 from __future__ import annotations
 
@@ -6,12 +7,11 @@ import copy
 import json
 import logging
 import os
-from pathlib import Path
 
 from . import APP_ID
+from .system import app_dirs
 
-CONFIG_DIR = Path(os.environ.get("APPDATA", Path.home())) / APP_ID
-DATA_DIR = Path(os.environ.get("LOCALAPPDATA", Path.home())) / APP_ID
+CONFIG_DIR, DATA_DIR = app_dirs(APP_ID)
 CONFIG_FILE = CONFIG_DIR / "config.json"
 STATE_FILE = DATA_DIR / "state.json"
 LOG_FILE = DATA_DIR / "shapeshifter.log"
