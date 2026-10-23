@@ -210,9 +210,14 @@ end tell''')
         text = log.read_text(encoding="utf-8", errors="replace")[start:]
         if "Showing the wheel for 2 file(s)" not in text:
             raise RuntimeError("⌃⌥C didn't open the wheel for the two selected files; log:\n" + text[-2500:])
-        # close the wheel (Escape), then a mouse trigger over the Finder window
+        if "Wheel has the keyboard: True" not in text:
+            raise RuntimeError("the wheel opened without the keyboard; log:\n" + text[-2500:])
+        # Escape closes it (the keyboard really goes to the wheel), then a mouse trigger over the Finder window
         _post_key(KEYCODES["escape"], 0)
         time.sleep(1.5)
+        text = log.read_text(encoding="utf-8", errors="replace")[start:]
+        if "Wheel dismissed" not in text:
+            raise RuntimeError("Escape didn't close the wheel; log:\n" + text[-2500:])
         osascript('tell application "Finder" to activate')
         time.sleep(1)
         b = osascript('tell application "Finder" to get bounds of front window').stdout.strip()

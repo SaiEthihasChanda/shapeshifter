@@ -801,11 +801,24 @@ class WheelOverlay(WheelView):
         self._open_anim.start()
 
     def _grab_focus(self):
+        from .system import IS_MAC, bring_to_front
+        if IS_MAC:
+            # Activate the app first: macOS gives the keyboard back to the app's last window (Settings) when it
+            # activates, so the wheel takes it afterwards, and once more when the activation has settled.
+            bring_to_front(self)
         self.raise_()
         self.activateWindow()
         self.setFocus()
-        from .system import bring_to_front
-        bring_to_front(self)
+        if IS_MAC:
+            QTimer.singleShot(80, self, self._take_keyboard)
+            QTimer.singleShot(500, self, lambda: log.info("Wheel has the keyboard: %s", self.isActiveWindow()))
+        else:
+            bring_to_front(self)
+
+    def _take_keyboard(self):
+        self.raise_()
+        self.activateWindow()
+        self.setFocus()
 
     def _set_t(self, v):
         self._t = float(v)
