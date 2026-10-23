@@ -199,7 +199,11 @@ class Daemon(Controller):
         self._mouse_bridge.triggered.connect(self.on_mouse_trigger)
         self.mouse = MouseHook(self._mouse_bridge.triggered.emit)
         self.register_hotkeys()
+        self.update_available = None
+        self._update_worker = None
+        self._message_action = None
         self._build_tray()
+        self._start_update_checks()
 
         # Reload when the settings app (or a text editor) changes config.json.
         config.CONFIG_DIR.mkdir(parents=True, exist_ok=True)
@@ -326,6 +330,7 @@ class Daemon(Controller):
         self.tray.activated.connect(
             lambda reason: self.open_settings()
             if reason == QSystemTrayIcon.ActivationReason.DoubleClick else None)
+        self.tray.messageClicked.connect(self._message_clicked)
         self._update_tray()
         self.tray.show()
 
@@ -342,6 +347,14 @@ class Daemon(Controller):
         f.setBold(True)
         a.setFont(f)
         menu.addAction("Convert files…").triggered.connect(self._pick_files)
+        menu.addSeparator()
+        if self.update_available:
+            u = menu.addAction(f"Update to {self.update_available.version}…")
+            u.triggered.connect(self.open_update)
+            uf = u.font()
+            uf.setBold(True)
+            u.setFont(uf)
+        menu.addAction("Check for updates…").triggered.connect(lambda: self.open_update(check=True))
         menu.addSeparator()
         for b, ok in self.binding_status:
             info = QAction(f"{pretty_keys(b['keys'])}   {describe_binding(b)}"
@@ -361,6 +374,55 @@ class Daemon(Controller):
             orig.addAction(act)
         menu.addSeparator()
         menu.addAction("Quit").triggered.connect(self._quit)
+
+    # -------------------------------------------------------------- updates
+
+    def _start_update_checks(self):
+        """Look for a newer release shortly after start, then every few hours (it only asks GitHub once a day)."""
+        QTimer.singleShot(45_000, self._check_updates)
+        self._update_timer = QTimer(self, interval=6 * 3600 * 1000)
+        self._update_timer.timeout.connect(self._check_updates)
+        self._update_timer.start()
+
+    def _check_updates(self):
+        from . import updates
+        if self._update_worker is not None or not updates.due(self.cfg):
+            return
+        from .updates_dialog import CheckWorker
+        self._update_worker = CheckWorker()
+        self._update_worker.done.connect(self._update_checked)
+        self._update_worker.start()
+
+    def _update_checked(self, up, error):
+        from . import updates
+        self._update_worker = None
+        if error:
+            log.info("Update check failed: %s", error)
+            return
+        updates.remember_check()
+        if not up:
+            if self.update_available:
+                self.update_available = None
+                self._update_tray()
+            return
+        if up.version in (config.load_state().get("update_skipped"),):
+            return
+        self.update_available = up
+        self._update_tray()
+        if updates.should_announce(up):
+            updates.remember_check(up.version)
+            self._message_action = "update"
+            self.tray.showMessage(APP_NAME, f"ShapeShifter {up.version} is available. Click to update.",
+                                  QSystemTrayIcon.MessageIcon.Information, 8000)
+
+    def _message_clicked(self):
+        action, self._message_action = self._message_action, None
+        if action == "update":
+            self.open_update()
+
+    def open_update(self, check: bool = False):
+        from .updates_dialog import show_update_dialog
+        show_update_dialog(None if check else self.update_available)
 
     def _set_cfg(self, key, value):
         cfg = config.load()

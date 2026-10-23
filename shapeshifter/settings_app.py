@@ -1443,6 +1443,16 @@ class AboutPage(Page):
             legal.addWidget(btn)
         legal.addStretch(1)
         b.addLayout(legal)
+        upd = QHBoxLayout()
+        check = QPushButton("Check for updates…")
+        check.clicked.connect(self._check_updates)
+        auto = QCheckBox("Tell me when a new version is available")
+        auto.setChecked(bool(self.cfg.get("check_updates", True)))
+        auto.toggled.connect(lambda v: self.set("check_updates", v))
+        upd.addWidget(check)
+        upd.addWidget(auto)
+        upd.addStretch(1)
+        b.addLayout(upd)
         row = QHBoxLayout()
         for text, fn in (("Open settings file", lambda: os.startfile(config.CONFIG_FILE)),
                          ("Open log", lambda: config.LOG_FILE.exists() and os.startfile(config.LOG_FILE)),
@@ -1453,6 +1463,10 @@ class AboutPage(Page):
         row.addStretch(1)
         b.addLayout(row)
         b.addStretch(1)
+
+    def _check_updates(self):
+        from .updates_dialog import show_update_dialog
+        show_update_dialog()
 
     def _reset(self):
         if QMessageBox.question(self, APP_NAME, "Reset every setting (including hotkeys) to the defaults?") \

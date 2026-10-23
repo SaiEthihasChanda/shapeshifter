@@ -35,6 +35,7 @@ DEFAULTS = {
     "preserve_mtime": True,       # converted file keeps the source's modified time
     "prefer_native": False,       # use ShapeShifter's own converters before libraries
     "learn_reverse": True,        # after A -> B, offer B -> A on B files (best effort)
+    "check_updates": True,        # look for a newer release on GitHub once a day
     "ocr_language": "auto",       # "auto" = Windows profile languages, or a tag like "en-US"
     # ---- hotkeys
     "hotkeys": DEFAULT_HOTKEYS,

@@ -1,5 +1,8 @@
 # Changelog
 
+## 2.7.0
+- **Updates**: ShapeShifter checks GitHub once a day and shows a notification and a tray entry when a newer version exists. **Update now** downloads the installer, checks it against its published SHA-256, and upgrades in place (settings and hotkeys are kept). Also in tray › Check for updates… and Settings › About; "Skip this version" and an on/off switch are there too.
+
 ## 2.6.1
 - **Fewer wheel entries**: "ONE GIF / ONE PDF …" with several files selected is now a hidden choice inside the GIF / PDF entry (separate, or all in one), and "NO LOCATION" moved inside PROPERTIES.
 

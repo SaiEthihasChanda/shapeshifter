@@ -308,6 +308,9 @@ Other decode types:
 After you press *Reload*, the format is recognised by content and gets every conversion
 reachable from what it decodes to.
 
+## Updates
+The tray icon shows a notification, and an **Update to x.y.z…** entry, when a newer release is published on GitHub (checked at most once a day; the only thing sent is a normal request for the public release page). **Update now** downloads the installer, checks it against the SHA-256 GitHub publishes for it, and installs over the current version; your settings and hotkeys are kept and ShapeShifter restarts. **Check for updates…** is in the tray menu and Settings › About, where you can also switch the daily check off. **Skip this version** silences one release.
+
 ## Settings app
 
 | Page | Contents |
