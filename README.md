@@ -214,7 +214,7 @@ The centre of the wheel (or Esc) goes back out of a question. From the command l
 
 ## Combining several files
 
-Select **more than one** file and the wheel offers **ONE …** segments, the inverse of the splits above: pictures → animated **GIF /
+Select **more than one** file and the target you pick asks one more question: **separate** (each file converted on its own) or **all in one**, the inverse of the splits above. A format with no per-file conversion of its own (PDFs into one PDF, a slideshow video) keeps a **ONE …** entry. Examples: pictures → animated **GIF /
 WebP**, multi-page **TIFF**, **PDF** (a page each), a **slide deck** or a **slideshow video**; PDFs (and pictures) → one **PDF**; CSV / TSV /
 Excel files → **one workbook** with a sheet each; Word, Markdown, HTML or text → one **PDF / DOCX / Markdown**; decks → one deck;
 audio or video clips → one file; fonts → a **TTC**. Files are taken in name order (`frame2` before `frame10`) and are never removed.
@@ -223,7 +223,7 @@ audio or video clips → one file; fonts → a **TTC**. Files are taken in name 
 ## Doing something to a file that keeps it the same kind
 
 Next to the conversions the wheel offers **same-format actions** (grey): **SMALLER** and **RESIZE** (pictures), **ROTATE / FLIP**,
-**NO LOCATION** (removes camera, date and GPS data when the picture has any), PDF **SMALLER**, **SPLIT** into pages, **GET PICTURES**
+**NO LOCATION** (inside PROPERTIES; removes camera, date and GPS data when the picture has any), PDF **SMALLER**, **SPLIT** into pages, **GET PICTURES**
 and **ROTATE**, **TIDY** for JSON and XML (pretty / minify / sorted), **FIX TEXT** (UTF-8 and line endings), audio **EVEN VOLUME** and
 **SMALLER**, and video **SMALLER** and **NO SOUND**. The result is a new file such as `photo (smaller).jpg` and the original follows
 your usual setting (Recycle Bin by default).

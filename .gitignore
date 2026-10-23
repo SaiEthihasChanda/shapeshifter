@@ -9,3 +9,4 @@ graphify-out/
 .claude/
 *.pfx
 *.p12
+Motion_as_kit/*

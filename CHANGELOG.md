@@ -1,5 +1,8 @@
 # Changelog
 
+## 2.6.1
+- **Fewer wheel entries**: "ONE GIF / ONE PDF …" with several files selected is now a hidden choice inside the GIF / PDF entry (separate, or all in one), and "NO LOCATION" moved inside PROPERTIES.
+
 ## 2.6.0
 - **Properties**: view and edit a file's metadata from the wheel (or `shapeshifter meta`). Pictures (EXIF: author, copyright, description, date taken, camera, GPS location; JPEG and PNG are edited without recompressing), PDF, Word / Excel / PowerPoint / OpenDocument (title, author, subject, keywords, company, dates), audio and video tags (title, artist, album, year, track …), and the file's own created / modified dates. Remove location only, remove everything, or edit many files at once.
 

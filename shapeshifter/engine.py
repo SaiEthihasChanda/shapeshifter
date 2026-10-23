@@ -12,7 +12,7 @@ from pathlib import Path
 
 from . import planner
 from .backends import ALL_BACKENDS, Backend, Context, ConversionError, RiskyFile
-from .formats import canonical, file_ext, split_name
+from .formats import canonical, file_ext, label_of, split_name
 from .identify import identify
 from .planner import TargetOption
 
@@ -84,10 +84,12 @@ def options_for(path: str | Path, include_hidden_engine_targets: bool = False,
         if _can_fill_forms(src):
             opts.append(TargetOption(key="fill", kind="fill"))
         from . import actions
-        opts += actions.options_for(Path(path), src)
+        acts = actions.options_for(Path(path), src)
         from . import metadata
         if metadata.supports(src):
-            opts.append(TargetOption(key="meta", kind="meta"))
+            acts, meta = _fold_properties(acts)
+            opts.append(meta)
+        opts += acts
         opts = _filter_by_content(path, src, _apply_specs(path, src, _group_variants(path, src, opts)))
     if ident.details.get("sensitive"):
         # Private keys & keystores: only re-encodings of the same secret, never documents.
@@ -261,8 +263,40 @@ def visible_options(paths: list[str | Path], cfg: dict,
     opts = [o for o in _common(paths, False, forced)
             if not (o.kind == "convert" and any(f"{s}>{o.fmt}" in hidden for s in sources))]
     if len(paths) > 1:
-        opts = combine_options(paths) + opts
+        opts = _merge_combine(paths, opts)
     return opts[: max(1, int(cfg.get("max_segments", 16)))]
+
+
+def _fold_properties(acts: list) -> tuple[list, TargetOption]:
+    """PROPERTIES is the one place for a file's details; the one-click "no location" action lives inside it."""
+    import dataclasses
+    meta = TargetOption(key="meta", kind="meta")
+    private = [a for a in acts if a.key.split("#")[0] == "act:private"]
+    if not private:
+        return acts, meta
+    edit = dataclasses.replace(meta, variant_label="EDIT DETAILS", variant_note="Opens the properties window: change or remove any detail")
+    quick = dataclasses.replace(private[0], variant_label="NO LOCATION", applies="exif", variants=())
+    return [a for a in acts if a not in private], dataclasses.replace(meta, variants=(edit, quick))
+
+
+def _merge_combine(paths: list, opts: list[TargetOption]) -> list[TargetOption]:
+    """Several files: "all in one GIF" is a hidden choice inside the GIF entry (one each, or all together).
+    A format with no per-file conversion of its own (PDFs into one PDF) keeps an entry of its own."""
+    import dataclasses
+    wanted = {o.fmt: o for o in combine_options(paths)}
+    n = len(paths)
+    out = []
+    for o in opts:
+        joined = wanted.pop(o.fmt, None) if o.kind == "convert" else None
+        if joined is None:
+            out.append(o)
+            continue
+        together = dataclasses.replace(
+            joined, variant_label="ALL IN ONE", variant_note=f"The {n} files become a single {label_of(o.fmt)}, in name order. The originals are kept.")
+        separate = list(o.variants) or [dataclasses.replace(
+            o, variant_label="SEPARATE", variant_note=f"Each file becomes its own {label_of(o.fmt)}")]
+        out.append(dataclasses.replace(o, variants=tuple(separate) + (together,)))
+    return list(wanted.values()) + out
 
 
 def combine_options(paths: list) -> list[TargetOption]:

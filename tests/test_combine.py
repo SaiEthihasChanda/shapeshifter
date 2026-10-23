@@ -263,7 +263,10 @@ class TestWheel:
         app = QApplication.instance() or QApplication([])
         ps = pictures(tmp_path, 3)
         w = WheelOverlay([str(p) for p in ps], dict(CFG, original="recycle", animation_ms=0))
-        assert w.targets[0].startswith("combine:") and "combine:pdf" in w.targets
+        assert w.targets[0] == "combine:mp4"                       # no per-picture MP4, so it keeps its own entry
+        assert not any(t.startswith("combine:") and t != "combine:mp4" for t in w.targets)
+        pdf = w.option("pdf")                                      # "all in one PDF" hides inside the PDF entry
+        assert [v.key for v in pdf.variants][-1] == "combine:pdf" and len(pdf.variants) >= 2
         w._commit("combine:pdf")
         end = time.time() + 30
         while time.time() < end and w.state != "done":

@@ -63,8 +63,13 @@ class TestPictures:
         assert o["act:smaller"].category == "tool"
 
     def test_private_is_offered_only_when_there_is_metadata(self, tmp_path):
-        assert "act:private" in opts(photo(tmp_path / "e.jpg", exif=True))
-        assert "act:private" not in opts(photo(tmp_path / "n.jpg"))
+        # the one-click "no location" lives inside PROPERTIES, and only when there is something to remove
+        with_exif = opts(photo(tmp_path / "e.jpg", exif=True))
+        assert "act:private" not in with_exif
+        assert [v.key for v in with_exif["meta"].variants] == ["meta", "act:private"]
+        from shapeshifter import variants
+        assert variants.check("exif", photo(tmp_path / "e2.jpg", exif=True), "jpg")
+        assert not variants.check("exif", photo(tmp_path / "n2.jpg"), "jpg")
 
     def test_smaller(self, tmp_path):
         p = photo(tmp_path / "p.jpg")

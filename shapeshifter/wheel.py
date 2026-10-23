@@ -294,7 +294,7 @@ class WheelView(QWidget):
         if opt.kind == "inspect":
             return ["inspect", "info"]
         if opt.kind == "meta":
-            return ["properties", "metadata", "exif", "author", "tags", "details", "edit", "location", "gps", "title", "artist"]
+            return ["private", "privacy", "strip", "properties", "metadata", "exif", "author", "tags", "details", "edit", "location", "gps", "title", "artist"]
         if opt.kind == "fill":
             return ["fill", "form", "write", "type", "sign", "signature", "checkbox", "inferred"]
         if opt.kind == "combine":
@@ -928,7 +928,7 @@ class WheelOverlay(WheelView):
         if self.state != "choose":
             return
         opt = self.option(target)
-        if not resolved and opt is not None and opt.kind in ("convert", "action") and len(opt.variants) > 1:
+        if not resolved and opt is not None and opt.kind in ("convert", "action", "meta") and len(opt.variants) > 1:
             self._start_variants(opt)
             return
         if target == "inspect":
