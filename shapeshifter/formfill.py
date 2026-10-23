@@ -11,10 +11,10 @@ import shutil
 from pathlib import Path
 
 from PySide6.QtCore import QPointF, QRectF, Qt, QThread, QTimer, Signal
-from PySide6.QtGui import QColor, QImage, QPainter, QPen, QPixmap
+from PySide6.QtGui import QColor, QFont, QImage, QPainter, QPen, QPixmap
 from PySide6.QtWidgets import (QApplication, QCheckBox, QComboBox, QDialog, QFileDialog, QFrame,
                                QHBoxLayout, QLabel, QLineEdit, QMessageBox, QPushButton,
-                               QScrollArea, QSlider, QVBoxLayout, QWidget)
+                               QScrollArea, QSpinBox, QVBoxLayout, QWidget)
 
 from . import config, forms
 from .core import ConversionError
@@ -131,20 +131,33 @@ class SignaturePad(QDialog):
 
 # ---------------------------------------------------------------- preview widget
 
+GRIP = 6                                    # screen pixels around a frame's edge that resize it
+CURSORS = {"move": Qt.CursorShape.SizeAllCursor, "l": Qt.CursorShape.SizeHorCursor,
+           "r": Qt.CursorShape.SizeHorCursor, "t": Qt.CursorShape.SizeVerCursor,
+           "b": Qt.CursorShape.SizeVerCursor, "tl": Qt.CursorShape.SizeFDiagCursor,
+           "br": Qt.CursorShape.SizeFDiagCursor, "tr": Qt.CursorShape.SizeBDiagCursor,
+           "bl": Qt.CursorShape.SizeBDiagCursor}
+
+
 class Preview(QWidget):
-    """The rendered form with a frame around each field. Clicking places a new field."""
+    """The rendered form with a frame around each field. Clicking places a new field; dragging a
+    frame moves it, dragging its edges or corners resizes it; arrow keys nudge the selected one."""
 
     clicked = Signal(float, float)          # position in image pixels
     field_clicked = Signal(int)
+    field_moved = Signal(int)               # a field's box changed (while dragging, too)
+    delete_requested = Signal(int)
 
     def __init__(self):
         super().__init__()
         self.setMinimumSize(420, 420)
+        self.setFocusPolicy(Qt.FocusPolicy.ClickFocus)
         self.pix: QPixmap | None = None
         self.size_px = (1, 1)
         self.fields: list[forms.Field] = []
         self.selected = -1
         self.placing = False
+        self._drag = None                   # (index, mode, start x, start y, original box)
         self.setMouseTracking(True)
 
     def set_pixmap(self, pix: QPixmap | None, size_px: tuple[int, int]):
@@ -158,6 +171,41 @@ class Preview(QWidget):
         w, h = self.pix.width() * k, self.pix.height() * k
         return QRectF((self.width() - w) / 2, (self.height() - h) / 2, w, h)
 
+    def _screen(self, box) -> QRectF:
+        r = self._rect()
+        k = r.width() / self.size_px[0]
+        x, y, w, h = box
+        return QRectF(r.x() + x * k, r.y() + y * k, w * k, h * k)
+
+    def _image_point(self, pos) -> tuple[float, float]:
+        r = self._rect()
+        k = self.size_px[0] / r.width()
+        return (pos.x() - r.x()) * k, (pos.y() - r.y()) * k
+
+    @staticmethod
+    def movable(f) -> bool:
+        return not f.widget                 # a real PDF field stays where the PDF puts it
+
+    def _hit(self, pos) -> tuple[int, str]:
+        """(field index, "move" or the edges being grabbed) under a screen position; selected one first."""
+        order = list(range(len(self.fields) - 1, -1, -1))
+        if 0 <= self.selected < len(self.fields):
+            order.remove(self.selected)
+            order.insert(0, self.selected)
+        for i in order:
+            if not self.movable(self.fields[i]):
+                if self._screen(self.fields[i].box).contains(pos):
+                    return i, ""
+                continue
+            s = self._screen(self.fields[i].box)
+            if not s.adjusted(-GRIP, -GRIP, GRIP, GRIP).contains(pos):
+                continue
+            g = min(GRIP, s.width() / 4, s.height() / 4)
+            edge = ("t" if pos.y() <= s.top() + g else "b" if pos.y() >= s.bottom() - g else "") + \
+                   ("l" if pos.x() <= s.left() + g else "r" if pos.x() >= s.right() - g else "")
+            return i, edge or "move"
+        return -1, ""
+
     def paintEvent(self, _):
         p = QPainter(self)
         p.setRenderHint(QPainter.RenderHint.SmoothPixmapTransform)
@@ -166,33 +214,119 @@ class Preview(QWidget):
             return
         r = self._rect()
         p.drawPixmap(r.toRect(), self.pix)
-        k = r.width() / self.size_px[0]
         for i, f in enumerate(self.fields):
-            x, y, w, h = f.box
             col = QColor(KIND_COLORS.get(f.kind, "#888"))
             sel = i == self.selected
             col.setAlpha(255 if sel else 150)
             p.setPen(QPen(col, 2.5 if sel else 1.2, Qt.PenStyle.SolidLine if sel else Qt.PenStyle.DashLine))
             p.setBrush(QColor(col.red(), col.green(), col.blue(), 40 if sel else 14))
-            p.drawRect(QRectF(r.x() + x * k, r.y() + y * k, w * k, h * k))
+            s = self._screen(f.box)
+            p.drawRect(s)
+            if sel and self.movable(f):     # grips on the corners and the middle of each side
+                p.setPen(QPen(QColor("white"), 1))
+                p.setBrush(col)
+                for gx, gy in ((s.left(), s.top()), (s.right(), s.top()), (s.left(), s.bottom()),
+                               (s.right(), s.bottom()), (s.center().x(), s.top()), (s.center().x(), s.bottom()),
+                               (s.left(), s.center().y()), (s.right(), s.center().y())):
+                    p.drawRect(QRectF(gx - 3.5, gy - 3.5, 7, 7))
 
     def mousePressEvent(self, e):
         r = self._rect()
-        if self.pix is None or not r.contains(e.position()):
+        if self.pix is None or e.button() != Qt.MouseButton.LeftButton:
             return
-        k = self.size_px[0] / r.width()
-        ix, iy = (e.position().x() - r.x()) * k, (e.position().y() - r.y()) * k
         if self.placing:
-            self.clicked.emit(ix, iy)
+            if r.contains(e.position()):
+                self.clicked.emit(*self._image_point(e.position()))
             return
-        for i in range(len(self.fields) - 1, -1, -1):
-            x, y, w, h = self.fields[i].box
-            if x <= ix <= x + w and y <= iy <= y + h:
-                self.field_clicked.emit(i)
-                return
+        i, mode = self._hit(e.position())
+        if i < 0:
+            return
+        self.field_clicked.emit(i)
+        if mode:
+            self._drag = (i, mode, *self._image_point(e.position()), self.fields[i].box)
+
+    def mouseMoveEvent(self, e):
+        if self._drag is None:
+            if not self.placing and self.pix is not None:
+                i, mode = self._hit(e.position())
+                if i >= 0 and mode:
+                    self.setCursor(CURSORS[mode])
+                elif i >= 0:
+                    self.setCursor(Qt.CursorShape.PointingHandCursor)
+                else:
+                    self.unsetCursor()
+            return
+        i, mode, sx, sy, (x, y, w, h) = self._drag
+        ix, iy = self._image_point(e.position())
+        dx, dy = ix - sx, iy - sy
+        W, H = self.size_px
+        least = 6.0
+        if mode == "move":
+            x = min(max(0.0, x + dx), W - w)
+            y = min(max(0.0, y + dy), H - h)
+        else:
+            x1, y1 = x + w, y + h
+            if "l" in mode:
+                x = min(max(0.0, x + dx), x1 - least)
+            if "r" in mode:
+                x1 = max(min(W, x1 + dx), x + least)
+            if "t" in mode:
+                y = min(max(0.0, y + dy), y1 - least)
+            if "b" in mode:
+                y1 = max(min(H, y1 + dy), y + least)
+            w, h = x1 - x, y1 - y
+            if self.fields[i].kind == "checkbox" and len(mode) == 2:
+                w = h = max(w, h)           # a check box stays square when dragged by a corner
+        self.fields[i].box = (x, y, w, h)
+        self.update()
+        self.field_moved.emit(i)
+
+    def mouseReleaseEvent(self, e):
+        self._drag = None
+
+    def keyPressEvent(self, e):
+        i = self.selected
+        if not 0 <= i < len(self.fields):
+            return super().keyPressEvent(e)
+        if e.key() in (Qt.Key.Key_Delete, Qt.Key.Key_Backspace):
+            self.delete_requested.emit(i)
+            return
+        step = {Qt.Key.Key_Left: (-1, 0), Qt.Key.Key_Right: (1, 0), Qt.Key.Key_Up: (0, -1),
+                Qt.Key.Key_Down: (0, 1)}.get(e.key())
+        if step is None or not self.movable(self.fields[i]):
+            return super().keyPressEvent(e)
+        n = 10 if e.modifiers() & Qt.KeyboardModifier.ShiftModifier else 1
+        x, y, w, h = self.fields[i].box
+        W, H = self.size_px
+        self.fields[i].box = (min(max(0.0, x + step[0] * n), W - w), min(max(0.0, y + step[1] * n), H - h), w, h)
+        self.update()
+        self.field_moved.emit(i)
 
 
 # ------------------------------------------------------------------- the window
+
+def _font_box(first: str = "") -> QComboBox:
+    """Writing styles, then every installed font, each shown in its own typeface."""
+    box = QComboBox()
+    box.setMaxVisibleItems(18)
+    if first:
+        box.addItem(first)
+    for name in forms.font_names():
+        box.addItem(name)
+        if name not in forms.FONTS:
+            box.setItemData(box.count() - 1, QFont(name), Qt.ItemDataRole.FontRole)
+    return box
+
+
+def _size_box(value: int) -> QSpinBox:
+    box = QSpinBox()
+    box.setRange(30, 400)
+    box.setSingleStep(10)
+    box.setSuffix(" %")
+    box.setValue(value)
+    box.setToolTip("Size of the writing, compared with the size that fits the form's lines")
+    return box
+
 
 class FormFiller(QDialog):
     def __init__(self, path: str, cfg: dict):
@@ -206,13 +340,15 @@ class FormFiller(QDialog):
         self._bases: dict[int, tuple] = {}     # page -> (downscaled image, scale) for quick previews
         self.rows: list[QWidget] = []
         self._saved_sig = str(SIGNATURE_FILE) if SIGNATURE_FILE.exists() else ""
-        self._timer = QTimer(self, singleShot=True, interval=120)
+        self._timer = QTimer(self, singleShot=True, interval=80)
         self._timer.timeout.connect(self._redraw)
 
         root = QHBoxLayout(self)
         self.preview = Preview()
         self.preview.field_clicked.connect(self._select)
         self.preview.clicked.connect(self._place)
+        self.preview.field_moved.connect(self._changed)
+        self.preview.delete_requested.connect(lambda i: self._remove(self.cur()[i]))
         root.addWidget(self.preview, 3)
 
         side = QVBoxLayout()
@@ -254,24 +390,37 @@ class FormFiller(QDialog):
         add.addStretch(1)
         side.addLayout(add)
 
+        # the selected answer: its own font and size, on top of the whole form's
+        self.field_bar = QWidget()
+        fb = QHBoxLayout(self.field_bar)
+        fb.setContentsMargins(0, 0, 0, 0)
+        self.field_font = _font_box("Same as the form")
+        self.field_size = _size_box(100)
+        self.field_font.currentIndexChanged.connect(self._field_look)
+        self.field_size.valueChanged.connect(self._field_look)
+        self.field_name = QLabel("Selected answer:")
+        fb.addWidget(self.field_name)
+        fb.addWidget(self.field_font, 1)
+        fb.addWidget(QLabel("Size"))
+        fb.addWidget(self.field_size)
+        self.field_bar.setEnabled(False)
+        self.field_bar.setToolTip("Click a text field on the form (or its box on the right) to give that "
+                                  "answer its own font or size.")
+        side.addWidget(self.field_bar)
+
         look = QHBoxLayout()
-        self.style = QComboBox()
-        self.style.addItems(list(forms.FONTS))
+        self.style = _font_box()
         self.ink = QComboBox()
         self.ink.addItems(list(forms.INKS))
-        self.size = QSlider(Qt.Orientation.Horizontal)
-        self.size.setRange(60, 160)
-        self.size.setValue(105)
-        self.size.setFixedWidth(90)
+        self.size = _size_box(100)
         for w in (self.style, self.ink):
             w.currentIndexChanged.connect(self._changed)
         self.size.valueChanged.connect(self._changed)
-        look.addWidget(QLabel("Writing:"))
-        look.addWidget(self.style)
+        look.addWidget(QLabel("All answers:"))
+        look.addWidget(self.style, 1)
         look.addWidget(self.ink)
         look.addWidget(QLabel("Size"))
         look.addWidget(self.size)
-        look.addStretch(1)
         side.addLayout(look)
 
         bottom = QHBoxLayout()
@@ -328,7 +477,8 @@ class FormFiller(QDialog):
         self.status.setText(
             f"Found {n['text']} text field(s), {n['checkbox']} check box(es) and {n['signature']} signature "
             f"line(s){pages}. Fill them in on the right; click a frame on the form to jump to it. "
-            "If one was missed, add it with the buttons below, then click where it goes on the form."
+            "Drag a frame to move it, or its edges and corners to resize it (arrow keys nudge, Delete "
+            "removes). If one was missed, add it with the buttons below, then click where it goes."
             + (" Fields that are part of the PDF itself stay fillable in the saved copy." if native else ""))
         self.status.setStyleSheet("")
         self.save_btn.setEnabled(True)
@@ -349,6 +499,7 @@ class FormFiller(QDialog):
             return
         self.page = page
         self.preview.selected = -1
+        self._show_field_look(None)
         self._placing_kind = None
         self.preview.placing = False
         self._update_nav()
@@ -408,13 +559,37 @@ class FormFiller(QDialog):
     def _remove(self, f):
         self.fields.remove(f)
         self.preview.selected = -1
+        self._show_field_look(None)
         self._rebuild_rows()
+        self._changed()
+
+    def _show_field_look(self, f):
+        """Point the "Selected answer" font and size at a field (text fields only)."""
+        self._looking = None
+        ok = f is not None and f.kind == "text" and not f.widget
+        self.field_bar.setEnabled(ok)
+        for w in (self.field_font, self.field_size):
+            w.blockSignals(True)
+        self.field_font.setCurrentIndex(max(0, self.field_font.findText(f.font)) if ok and f.font else 0)
+        self.field_size.setValue(round((f.scale or 1.0) * 100) if ok else 100)
+        for w in (self.field_font, self.field_size):
+            w.blockSignals(False)
+        self.field_name.setText(f"{(f.label or 'Text')[:22]}:" if ok else "Selected answer:")
+        self._looking = f if ok else None
+
+    def _field_look(self, *_):
+        f = getattr(self, "_looking", None)
+        if f is None:
+            return
+        f.font = "" if self.field_font.currentIndex() == 0 else self.field_font.currentText()
+        f.scale = self.field_size.value() / 100.0
         self._changed()
 
     def _select(self, i: int, focus: bool = True):
         self.preview.selected = i
         self.preview.update()
         cur = self.cur()
+        self._show_field_look(cur[i] if 0 <= i < len(cur) else None)
         if focus and i < len(cur):
             edit = getattr(cur[i], "_edit", None)
             if edit is not None:
@@ -491,7 +666,8 @@ class FormFiller(QDialog):
     # ---------------------------------------------------------------- output
 
     def _changed(self, *_):
-        self._timer.start()
+        if not self._timer.isActive():              # at most every 80 ms, so dragging and typing stay live
+            self._timer.start()
 
     def _redraw(self):
         if len(self.sizes) == 1 and self.sizes[0] == (1, 1):

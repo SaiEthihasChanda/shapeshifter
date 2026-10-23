@@ -1,5 +1,12 @@
 # Changelog
 
+## 2.8.0
+- **Move and resize fields** in the Fill form window: drag a frame to move it, drag its edges or corners to resize it (check boxes stay square), arrow keys nudge the selected field (Shift for 10 px) and Delete removes it. Works for found fields and ones you add.
+- **Fonts and sizes**: the writing can be any font installed in Windows, not only Typed / Handwriting / Typewriter, and the size is a percentage you type. Select a field to give that one answer its own font and size.
+- **Fill form finds far more blanks**: dotted leaders ("........"), second lines with no label, several blanks on one line ("FROM THE …… day of …… 20……", "__ / __ / ____"), blanks inside sentences ("I, ______, residing at ______"), empty cells of ruled tables (named by their row and column, e.g. "Name — Wrong Entry"), boxes with a heading above them, and signature lines with the caption printed underneath. Junk fields from long sentences are gone.
+- **Crooked and grey scans**: a photo or scan that's a few degrees off is straightened before reading, and the ink threshold follows the paper's shade, so the answers still land on the lines.
+- **Better names for fields**: hints printed under a blank ("(full address)") are used, short labels are completed from the sentence ("my mobile number is"), table headings are re-read with the rules removed so letters touching them aren't lost, and words the OCR skipped (a lone "No" beside a check box) get a second, closer look. Check boxes take the label on whichever side is nearer.
+
 ## 2.7.0
 - **Updates**: ShapeShifter checks GitHub once a day and shows a notification and a tray entry when a newer version exists. **Update now** downloads the installer, checks it against its published SHA-256, and upgrades in place (settings and hotkeys are kept). Also in tray › Check for updates… and Settings › About; "Skip this version" and an on/off switch are there too.
 

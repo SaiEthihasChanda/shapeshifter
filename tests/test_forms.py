@@ -38,6 +38,37 @@ def make_form(path: Path) -> Path:
     return path
 
 
+def make_leader_and_table_form(path: Path) -> Path:
+    """Dotted leaders (one with no label: a second line), and a ruled table with empty cells."""
+    im = Image.new("RGB", (1400, 1200), "white")
+    d = ImageDraw.Draw(im)
+    f = _font(30)
+
+    def dots(x0, x1, y):
+        for x in range(x0, x1, 7):
+            d.rectangle((x, y - 3, x + 3, y), fill=(60, 60, 60))
+
+    d.text((80, 100), "The owner", font=f, fill="black")
+    dots(260, 1300, 128)
+    dots(80, 1300, 198)
+    d.text((80, 270), "FROM THE", font=f, fill="black")
+    dots(260, 600, 298)
+    d.text((620, 270), "day of", font=f, fill="black")
+    dots(720, 1300, 298)
+    top, rows, xs = 450, ["Item", "Name", "Phone"], [80, 400, 850, 1300]
+    for i in range(len(rows) + 1):
+        d.line((80, top + i * 60, 1300, top + i * 60), fill="black", width=2)
+    for x in xs:
+        d.line((x, top, x, top + len(rows) * 60), fill="black", width=2)
+    for i, r in enumerate(rows):
+        d.text((95, top + i * 60 + 14), r, font=f, fill="black")
+    d.text((415, top + 14), "Old", font=f, fill="black")
+    d.text((865, top + 14), "New", font=f, fill="black")
+    d.text((80, 900), "Signature of tenant", font=f, fill="black")
+    im.save(path)
+    return path
+
+
 def make_digital_pdf(path: Path, pages: int = 2) -> Path:
     """A PDF whose text is real text: labels with rules, check boxes and a signature line."""
     doc = pymupdf.open()
@@ -196,6 +227,28 @@ class TestDetection:
         assert 340 <= name.box[0] <= 380 and 170 <= name.box[1] <= 200 and name.box[2] > 700
         student = by[("checkbox", "Student")]
         assert abs(student.box[0] - 60) <= 3 and abs(student.box[1] - 500) <= 3
+
+    def test_dotted_leaders_table_cells_and_a_caption_signature(self, tmp_path):
+        src = make_leader_and_table_form(tmp_path / "lease.png")
+        fields, _ = forms.detect(src, CFG)
+        labels = [f.label for f in fields if f.kind == "text"]
+        assert "The owner" in labels and "The owner (cont.)" in labels       # second line, no label
+        assert "FROM THE" in labels and "day of" in labels                  # two blanks on one line
+        cells = [f for f in fields if " — " in f.label]
+        assert len(cells) == 4 and {c.label for c in cells} >= {"Name — Old", "Phone — New"}
+        sig = [f for f in fields if f.kind == "signature"]
+        assert len(sig) == 1 and sig[0].box[1] + sig[0].box[3] <= 900       # above its caption
+
+    def test_a_crooked_grey_scan_finds_the_same_fields_on_its_lines(self, tmp_path):
+        straight = make_leader_and_table_form(tmp_path / "lease.png")
+        im = Image.open(straight).convert("L").rotate(-1.2, resample=Image.BICUBIC, fillcolor=255)
+        im.point(lambda v: int(v * 0.85 + 22)).convert("RGB").save(tmp_path / "scan.jpg", quality=85)
+        want = sorted(f.label for f in forms.detect(straight, CFG)[0])
+        fields, _ = forms.detect(tmp_path / "scan.jpg", CFG)
+        assert sorted(f.label for f in fields) == want
+        # The page was turned 1.2° clockwise about its centre: the owner's line moved down on the right.
+        owner = next(f for f in fields if f.label == "The owner")
+        assert 85 <= owner.box[1] + owner.box[3] <= 135
 
     def test_detect_then_fill_round_trip(self, tmp_path):
         src = make_form(tmp_path / "form.png")

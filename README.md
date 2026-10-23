@@ -159,13 +159,17 @@ pixels, not as selectable text; follow it with *OCR PDF* if you want it searchab
 ## Filling in a form that is only a picture
 
 Pick **FILL FORM** on the wheel for a photo or scan of a form, or for a **PDF** (scanned, or an ordinary PDF with printed blanks). ShapeShifter finds the blanks next to labels
-(a line or free space), square check boxes and signature lines, and opens a window with the form on the left
-as a live preview and the fields on the right.
+(a line, a dotted line or free space), blanks inside sentences, empty table cells and boxes, square check boxes and
+signature lines, and opens a window with the form on the left as a live preview and the fields on the right. A crooked
+photo or scan is straightened before it is read.
 
 - Type the answers, tick boxes, and add a signature: **Draw…** it with the mouse or **Choose image…** (a scan or photo of
   your signature; the white background is removed). It remembers your signature for next time.
 - Missed a field? Press **+ Text**, **+ Check box** or **+ Signature**, then click where it goes on the form.
-- Pick the writing style (typed, handwriting, typewriter), ink colour and size. **Save filled image** writes
+- **Move and resize** any field: drag its frame, or drag its edges and corners. Arrow keys nudge the selected one (Shift
+  for bigger steps) and Delete removes it.
+- Pick the writing for **all answers** (typed, handwriting, typewriter, or any font installed in Windows), the ink colour
+  and the size; select a field to give **that answer** its own font and size. **Save filled image** writes
   `form (filled).png` next to the original, which is never changed.
 - **PDFs:** every page (up to 30) is read, and you move between them with *Previous / Next page*. The saved copy is
   `form (filled).pdf`: your answers are laid over the original pages, so their text and sharpness are kept. If the PDF has
