@@ -215,6 +215,7 @@ end tell''')
         # Escape closes it (the keyboard really goes to the wheel), then a mouse trigger over the Finder window
         _post_key(KEYCODES["escape"], 0)
         time.sleep(1.5)
+        print("      after Escape:", screenshot(shots, "4b-after-escape"))
         text = log.read_text(encoding="utf-8", errors="replace")[start:]
         if "Wheel dismissed" not in text:
             raise RuntimeError("Escape didn't close the wheel; log:\n" + text[-2500:])

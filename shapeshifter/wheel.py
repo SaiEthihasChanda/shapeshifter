@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import logging
 import math
+import sys
 import threading
 import time
 from pathlib import Path
@@ -18,7 +19,7 @@ from PySide6.QtCore import QEasingCurve, QPoint, QPointF, QRectF, Qt, QThread, Q
     QVariantAnimation, Signal
 from PySide6.QtGui import QColor, QCursor, QFont, QFontMetrics, QGuiApplication, QPainter, \
     QPainterPath, QPen
-from PySide6.QtWidgets import QWidget
+from PySide6.QtWidgets import QApplication, QWidget
 
 from . import config, engine, themes
 from .backends import Cancelled, Context, ConversionError
@@ -811,9 +812,14 @@ class WheelOverlay(WheelView):
         self.setFocus()
         if IS_MAC:
             QTimer.singleShot(80, self, self._take_keyboard)
-            QTimer.singleShot(500, self, lambda: log.info("Wheel has the keyboard: %s", self.isActiveWindow()))
+            QTimer.singleShot(500, self, self._report_focus)
         else:
             bring_to_front(self)
+
+    def _report_focus(self):
+        from .mac.appkit import frontmost_bundle_id
+        log.info("Wheel has the keyboard: %s (front app: %s, focus: %s)", self.isActiveWindow(), frontmost_bundle_id(),
+                 type(QApplication.focusWidget()).__name__ if QApplication.focusWidget() else None)
 
     def _take_keyboard(self):
         self.raise_()
@@ -848,6 +854,8 @@ class WheelOverlay(WheelView):
 
     def keyPressEvent(self, e):
         k = e.key()
+        if sys.platform == "darwin":
+            log.info("Wheel key %s (state %s, search %r)", k, self.state, self.query)
         if k == Qt.Key.Key_Escape:
             if self.state == "busy" and self.worker:
                 self.worker.cancel_event.set()
