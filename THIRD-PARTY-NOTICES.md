@@ -1,6 +1,6 @@
 # Third-party notices
 
-ShapeShifter 2.8.0 is released under the **GNU AGPL v3 or later** (see [LICENSE](LICENSE)). The Windows installer bundles the components below, each under its own licence. This file is generated from the contents of the built application by `packaging/collect_licenses.py`; the installer also ships the full licence texts.
+ShapeShifter 2.9.0 is released under the **GNU AGPL v3 or later** (see [LICENSE](LICENSE)). The Windows installer bundles the components below, each under its own licence. This file is generated from the contents of the built application by `packaging/collect_licenses.py`; the installer also ships the full licence texts.
 
 ## Components
 
