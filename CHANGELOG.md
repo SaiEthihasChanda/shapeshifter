@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 2.10.0
 - **Settings redesigned**: every page is now built from the same card-based look (instead of the OS's native group boxes), so it reads as one consistent app in both light and dark mode. The side list is grouped: General, Wheel, Hotkeys, Formats and Engines are always shown; Advanced and Graph sit below a divider for when you need them; About is pinned to the bottom.
 - **A new Advanced page** collects the settings most people never touch: JPEG/WEBP/AVIF quality and PDF resolution, "prefer native converters," the OCR language picker, the wheel's ring size and hover-to-convert, learned reverse conversions, custom formats, and exporting the conversion graph (DOT/JSON). General, Wheel and Formats & mappings keep only what everyday use needs; the in-page route finder and graph export on the old Formats page are gone (the Graph page already covers routes, with a working 3D view).
 
