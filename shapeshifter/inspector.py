@@ -173,7 +173,7 @@ class Inspector(QDialog):
             self, "Describe this format",
             f"A description was created at\n{path}\n\nIt's pre-filled with this file's first "
             "bytes. Choose how the file should be read, save it, then press Reload in "
-            "Settings › Formats & mappings.")
+            "Settings › Advanced.")
 
     def _copy(self):
         r = self.rep

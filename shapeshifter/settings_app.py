@@ -2,13 +2,16 @@
 
 Runs inside the tray process (so hotkey changes apply instantly). Every change is saved
 to config.json right away; the tray app watches that file and reloads.
+
+The page list is split into two groups in the nav: the five pages most people use (General,
+Wheel, Hotkeys, Formats, Engines), and — below a divider — the ones only power users need
+(Advanced, Graph). About sits at the very bottom, as usual.
 """
 
 from __future__ import annotations
 
 import copy
 import logging
-import math
 import sys
 import webbrowser
 from pathlib import Path
@@ -19,7 +22,7 @@ from PySide6.QtGui import QBrush, QColor, QFont, QIcon, QLinearGradient, QPainte
 from PySide6.QtWidgets import (QAbstractItemView, QApplication, QButtonGroup, QCheckBox,
                                QColorDialog, QComboBox,
                                QDialog, QDialogButtonBox, QFormLayout, QFrame, QGridLayout,
-                               QGroupBox, QHBoxLayout, QHeaderView, QLabel, QLineEdit,
+                               QHBoxLayout, QHeaderView, QLabel, QLineEdit,
                                QListWidget, QListWidgetItem, QMenu, QMessageBox, QPlainTextEdit,
                                QPushButton, QRadioButton, QScrollArea, QSizePolicy, QSlider,
                                QSpinBox, QStackedWidget, QTableWidget, QTableWidgetItem,
@@ -173,10 +176,11 @@ def labeled_slider(lo: int, hi: int, value: int, fmt, step: int = 1):
 def heading(text: str, sub: str = "") -> QWidget:
     w = QWidget()
     lay = QVBoxLayout(w)
-    lay.setContentsMargins(0, 0, 0, 8)
+    lay.setContentsMargins(0, 0, 0, 10)
+    lay.setSpacing(4)
     t = QLabel(text)
     f = t.font()
-    f.setPointSizeF(f.pointSizeF() * 1.6)
+    f.setPointSizeF(f.pointSizeF() * 1.7)
     f.setWeight(QFont.Weight.DemiBold)
     t.setFont(f)
     lay.addWidget(t)
@@ -185,6 +189,78 @@ def heading(text: str, sub: str = "") -> QWidget:
         s.setWordWrap(True)
         s.setStyleSheet("color: palette(placeholder-text);")
         lay.addWidget(s)
+    return w
+
+
+# ---------------------------------------------------------------- design system
+#
+# Every settings page is built from "cards" (Card) instead of the OS's native group boxes, so the
+# window looks the same — organised into clearly separate, evenly spaced sections — whether it is
+# running on Windows or on a Mac, and in light or dark mode. Colours come from the palette, never
+# hard-coded, so this follows the system theme automatically.
+
+CARD_QSS = ("QFrame#Card { background: palette(alternate-base); border: 1px solid palette(mid);"
+           " border-radius: 10px; }")
+
+NAV_QSS = ("QListWidget { background: transparent; border: none; outline: 0; }"
+          "QListWidget::item { border-radius: 8px; margin: 1px 10px; padding: 0 14px; }"
+          "QListWidget::item:hover:!selected { background: palette(alternate-base); }"
+          "QListWidget::item:selected { background: palette(highlight); color: palette(highlighted-text); }")
+
+
+class Card(QFrame):
+    """One section of a settings page: an optional title and subtitle, then its controls."""
+
+    def __init__(self, title: str = "", subtitle: str = ""):
+        super().__init__()
+        self.setObjectName("Card")
+        self.setStyleSheet(CARD_QSS)
+        outer = QVBoxLayout(self)
+        outer.setContentsMargins(18, 16, 18, 16)
+        outer.setSpacing(10)
+        if title:
+            t = QLabel(title)
+            f = t.font()
+            f.setWeight(QFont.Weight.DemiBold)
+            t.setFont(f)
+            outer.addWidget(t)
+        if subtitle:
+            s = QLabel(subtitle)
+            s.setWordWrap(True)
+            s.setStyleSheet("color: palette(placeholder-text);")
+            outer.addWidget(s)
+        self.body = QVBoxLayout()
+        self.body.setSpacing(10)
+        outer.addLayout(self.body)
+
+    def add(self, widget: QWidget) -> QWidget:
+        self.body.addWidget(widget)
+        return widget
+
+    def add_layout(self, layout):
+        self.body.addLayout(layout)
+        return layout
+
+
+def nav_divider(label: str = "") -> QWidget:
+    """A thin rule in the nav column, with an optional small caption above the next group of pages."""
+    w = QWidget()
+    lay = QVBoxLayout(w)
+    lay.setContentsMargins(18, 14, 18, 6)
+    lay.setSpacing(6)
+    line = QFrame()
+    line.setFrameShape(QFrame.Shape.HLine)
+    line.setFixedHeight(1)
+    line.setStyleSheet("background: palette(mid); border: none;")
+    lay.addWidget(line)
+    if label:
+        lab = QLabel(label)
+        f = lab.font()
+        f.setPointSizeF(max(8.0, f.pointSizeF() * 0.82))
+        f.setWeight(QFont.Weight.DemiBold)
+        lab.setFont(f)
+        lab.setStyleSheet("color: palette(placeholder-text);")
+        lay.addWidget(lab)
     return w
 
 
@@ -294,8 +370,8 @@ class Page(QScrollArea):
         self.setFrameShape(QFrame.Shape.NoFrame)
         inner = QWidget()
         self.body = QVBoxLayout(inner)
-        self.body.setContentsMargins(28, 22, 28, 22)
-        self.body.setSpacing(14)
+        self.body.setContentsMargins(28, 24, 28, 24)
+        self.body.setSpacing(18)
         self.setWidget(inner)
 
     @property
@@ -310,13 +386,16 @@ class Page(QScrollArea):
 
 
 class GeneralPage(Page):
+    """The handful of things most people set once and forget: what happens to the original file,
+    and whether ShapeShifter starts itself and shows up in the right-click menu."""
+
     def __init__(self, win):
         super().__init__(win)
         b = self.body
-        b.addWidget(heading("General", f"What happens to files, conversion quality and {SYSTEM} integration."))
+        b.addWidget(heading("General", f"What happens when a file is converted, and how "
+                                       f"ShapeShifter works with {SYSTEM}."))
 
-        g = QGroupBox("After a successful conversion, the original file…")
-        lay = QVBoxLayout(g)
+        c = Card("After converting, the original file…")
         self.orig = QButtonGroup(self)
         for key, label in (("recycle", f"Moves to the {TRASH} (recommended — easy to undo)"),
                            ("keep", "Stays where it is (you get both files)"),
@@ -325,87 +404,41 @@ class GeneralPage(Page):
             r.setChecked(self.cfg["original"] == key)
             r.toggled.connect(lambda on, k=key: on and self.set("original", k))
             self.orig.addButton(r)
-            lay.addWidget(r)
-        mt = QCheckBox("Converted file keeps the original's modified date")
+            c.add(r)
+        mt = QCheckBox("Keeps the original's modified date")
         mt.setChecked(self.cfg.get("preserve_mtime", True))
         mt.toggled.connect(lambda v: self.set("preserve_mtime", v))
-        lay.addWidget(mt)
-        nat = QCheckBox("Prefer ShapeShifter's own converters (PNG, BMP, TGA, QOI, ICO, GIF/JPEG "
-                        "decoding, PDF, Markdown/HTML/text, WAV/AIFF, XLSX) over libraries")
-        nat.setToolTip("Native converters need no third-party code but are slower on big files. "
-                       "Anything they can't handle still falls back to the libraries.")
-        nat.setChecked(bool(self.cfg.get("prefer_native", False)))
-        nat.toggled.connect(self._toggle_native)
-        lay.addWidget(nat)
-        b.addWidget(g)
+        c.add(mt)
+        b.addWidget(c)
 
-        g = QGroupBox("Quality")
-        form = QFormLayout(g)
-        for key, label, lo in (("jpeg_quality", "JPEG quality", 50), ("webp_quality", "WEBP quality", 50),
-                               ("avif_quality", "AVIF / HEIC quality", 30)):
-            w, s = labeled_slider(lo, 100, int(self.cfg[key]), lambda v: f"{v}")
-            s.valueChanged.connect(lambda v, k=key: self.set(k, v))
-            form.addRow(label, w)
-        dpi = QComboBox()
-        for v in (72, 96, 150, 200, 300, 600):
-            dpi.addItem(f"{v} DPI", v)
-        dpi.setCurrentIndex(max(0, dpi.findData(int(self.cfg["render_dpi"]))))
-        dpi.currentIndexChanged.connect(lambda _: self.set("render_dpi", dpi.currentData()))
-        form.addRow("PDF → image resolution", dpi)
-        b.addWidget(g)
-
-        g = QGroupBox("Text recognition (OCR)")
-        form = QFormLayout(g)
-        self.ocr_lang = QComboBox()
-        self._fill_ocr_languages()
-        self.ocr_lang.currentIndexChanged.connect(
-            lambda _: self.set("ocr_language", self.ocr_lang.currentData() or "auto"))
-        row = QWidget()
-        rl = QHBoxLayout(row)
-        rl.setContentsMargins(0, 0, 0, 0)
-        rl.addWidget(self.ocr_lang, 1)
-        detect = QPushButton("Detect languages")
-        detect.clicked.connect(self._detect_ocr_languages)
-        rl.addWidget(detect)
-        form.addRow("Language", row)
-        self.ocr_note = QLabel(
-            "Uses the text recognition built into macOS. “Automatic” works out the language by itself." if IS_MAC else
-            "Uses Windows' built-in OCR; add languages in Windows Settings › Time "
-            "& language › Language & region. “Automatic” uses your Windows languages.")
-        self.ocr_note.setWordWrap(True)
-        self.ocr_note.setStyleSheet("color: palette(placeholder-text);")
-        form.addRow(self.ocr_note)
-        b.addWidget(g)
-
-        g = QGroupBox("Finder and Mac integration" if IS_MAC else "Windows integration")
-        lay = QVBoxLayout(g)
+        c = Card("Finder and Mac integration" if IS_MAC else "Windows integration")
         from . import integration
         st = QCheckBox("Start automatically when I log in (needed for hotkeys)" if IS_MAC else
                        "Start automatically when I sign in to Windows (needed for hotkeys)")
         st.setChecked(integration.startup_enabled())
         st.toggled.connect(integration.set_startup)
-        lay.addWidget(st)
+        c.add(st)
         self.ctx = QCheckBox("Show “Convert with ShapeShifter” in Finder's right-click menu" if IS_MAC else
                              "Show “Convert to…” in File Explorer's right-click menu")
         self.ctx.setChecked(integration.context_menu_registered())
         self.ctx.toggled.connect(self._toggle_ctx)
-        lay.addWidget(self.ctx)
+        c.add(self.ctx)
         note = QLabel("Right-click files in Finder › Quick Actions › Convert with ShapeShifter. If it's missing, turn "
                       "it on in System Settings › General › Login Items & Extensions › Finder." if IS_MAC else
                       "On Windows 11 the entry is under “Show more options” (or Shift+right-click).")
         note.setWordWrap(True)
         note.setStyleSheet("color: palette(placeholder-text);")
-        lay.addWidget(note)
-        b.addWidget(g)
+        c.add(note)
+        b.addWidget(c)
         if IS_MAC:
             b.addWidget(self._permissions())
         b.addStretch(1)
 
-    def _permissions(self) -> QGroupBox:
+    def _permissions(self) -> Card:
         """macOS: the two permissions hotkeys need, with their state and a button to the right System Settings page."""
         from .mac import appkit
-        g = QGroupBox("Permissions")
-        grid = QGridLayout(g)
+        c = Card("Permissions")
+        grid = QGridLayout()
         self._acc = QLabel()
         self._acc.setWordWrap(True)
         grid.addWidget(self._acc, 0, 0)
@@ -420,11 +453,12 @@ class GeneralPage(Page):
         b2.clicked.connect(lambda: appkit.open_pane("automation"))
         grid.addWidget(b2, 1, 1)
         grid.setColumnStretch(0, 1)
+        c.add_layout(grid)
         self._acc_timer = QTimer(self, interval=2000)
         self._acc_timer.timeout.connect(self._show_accessibility)
         self._acc_timer.start()
         self._show_accessibility()
-        return g
+        return c
 
     def _show_accessibility(self):
         from .mac import appkit
@@ -433,40 +467,6 @@ class GeneralPage(Page):
             "✓ on: hotkeys and mouse triggers work." if ok else
             "<span style='color:#e5484d'>off</span>: hotkeys and mouse triggers need it. Turn on ShapeShifter in "
             "Privacy & Security › Accessibility (after an update, switch it off and on again)."))
-
-    def _fill_ocr_languages(self):
-        self.ocr_lang.blockSignals(True)
-        self.ocr_lang.clear()
-        self.ocr_lang.addItem("Automatic" if IS_MAC else "Automatic (Windows languages)", "auto")
-        for tag, name in config.load_state().get("ocr_langs", []):
-            self.ocr_lang.addItem(f"{name} ({tag})", tag)
-        current = self.cfg.get("ocr_language", "auto")
-        i = self.ocr_lang.findData(current)
-        if i < 0:                                   # a language we haven't detected: keep it visible
-            self.ocr_lang.addItem(f"{current} (not detected)", current)
-            i = self.ocr_lang.count() - 1
-        self.ocr_lang.setCurrentIndex(i)
-        self.ocr_lang.blockSignals(False)
-
-    def _detect_ocr_languages(self):
-        from PySide6.QtGui import QCursor
-        from . import ocr
-        QApplication.setOverrideCursor(QCursor(Qt.CursorShape.WaitCursor))
-        try:
-            info = ocr.status()
-        finally:
-            QApplication.restoreOverrideCursor()
-        config.save_state(ocr_langs=[list(t) for t in info["languages"]])
-        self._fill_ocr_languages()
-        self.ocr_note.setText(
-            f"Found {len(info['languages'])} OCR language(s): "
-            + ", ".join(n for _, n in info["languages"]) if info["ok"] else info["error"])
-
-    def _toggle_native(self, on: bool):
-        from . import planner
-        self.set("prefer_native", on)
-        self.win.flush()
-        planner.reset()
 
     def _toggle_ctx(self, on: bool):
         from . import integration
@@ -692,6 +692,7 @@ class HotkeysPage(Page):
                                        "a shortcut. Shortcuts can be key combinations or mouse "
                                        "buttons — e.g. middle-click a file to open the wheel for it. "
                                        "Double-click a row to change it."))
+        c = Card()
         self.table = QTableWidget(0, 3)
         self.table.setHorizontalHeaderLabels(["Shortcut", "Action", "Status"])
         self.table.horizontalHeader().setSectionResizeMode(1, QHeaderView.ResizeMode.Stretch)
@@ -702,8 +703,9 @@ class HotkeysPage(Page):
         self.table.setSelectionMode(QAbstractItemView.SelectionMode.SingleSelection)
         self.table.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
         self.table.doubleClicked.connect(lambda _: self._edit())
-        self.table.setMinimumHeight(220)
-        b.addWidget(self.table)
+        self.table.setMinimumHeight(200)
+        self.table.setFrameShape(QFrame.Shape.NoFrame)
+        c.add(self.table)
 
         row = QHBoxLayout()
         for text, fn in (("Add…", self._add), ("Edit…", self._edit), ("Remove", self._remove),
@@ -712,10 +714,11 @@ class HotkeysPage(Page):
             btn.clicked.connect(fn)
             row.addWidget(btn)
         row.addStretch(1)
-        b.addLayout(row)
+        c.add_layout(row)
+        b.addWidget(c)
 
-        g = QGroupBox("Keys on the wheel")
-        grid = QGridLayout(g)
+        c = Card("Keys on the wheel")
+        grid = QGridLayout()
         for i, (k, v) in enumerate([("Mouse move + click", "Choose a format"),
                                     ("← → ↑ ↓ / Tab", "Move between formats"),
                                     ("Letter key", "Jump to a format starting with it"),
@@ -728,7 +731,8 @@ class HotkeysPage(Page):
             grid.addWidget(kl, i, 0)
             grid.addWidget(QLabel(v), i, 1)
         grid.setColumnStretch(1, 1)
-        b.addWidget(g)
+        c.add_layout(grid)
+        b.addWidget(c)
         b.addStretch(1)
         self.refresh()
 
@@ -802,7 +806,10 @@ class HotkeysPage(Page):
         self._save(copy.deepcopy(config.DEFAULT_HOTKEYS))
 
 
-class AppearancePage(Page):
+class WheelPage(Page):
+    """Theme, size and the handful of behaviour toggles everyday users actually tweak. Ring count
+    and hover-to-convert are niche enough to live in Advanced instead."""
+
     def __init__(self, win):
         super().__init__(win)
         b = self.body
@@ -811,11 +818,11 @@ class AppearancePage(Page):
         split.setSpacing(24)
         b.addLayout(split, 1)
         left = QVBoxLayout()
+        left.setSpacing(18)
         split.addLayout(left, 5)
 
         # Themes
-        g = QGroupBox("Theme")
-        gl = QVBoxLayout(g)
+        c = Card("Theme")
         self.theme_list = QListWidget()
         self.theme_list.setViewMode(QListWidget.ViewMode.IconMode)
         self.theme_list.setIconSize(QSize(56, 56))
@@ -824,8 +831,9 @@ class AppearancePage(Page):
         self.theme_list.setResizeMode(QListWidget.ResizeMode.Adjust)
         self.theme_list.setFixedHeight(200)
         self.theme_list.setWordWrap(True)
+        self.theme_list.setFrameShape(QFrame.Shape.NoFrame)
         self.theme_list.currentItemChanged.connect(self._theme_changed)
-        gl.addWidget(self.theme_list)
+        c.add(self.theme_list)
         row = QHBoxLayout()
         self.by_cat = QCheckBox("Colour segments by file category")
         self.by_cat.setChecked(self.cfg.get("color_by_category", True))
@@ -835,57 +843,48 @@ class AppearancePage(Page):
         self.accent_btn = QPushButton("Accent colour…")
         self.accent_btn.clicked.connect(self._pick_accent)
         row.addWidget(self.accent_btn)
-        gl.addLayout(row)
-        left.addWidget(g)
+        c.add_layout(row)
+        left.addWidget(c)
 
         # Size & look
-        g = QGroupBox("Size and look")
-        form = QFormLayout(g)
+        c = Card("Size and look")
+        form = QFormLayout()
         self._slider(form, "Wheel size", "wheel_scale", 60, 160, 100, lambda v: f"{v}%", scale=100)
         self._slider(form, "Text size", "label_scale", 70, 150, 100, lambda v: f"{v}%", scale=100)
         self._slider(form, "Opacity", "wheel_opacity", 40, 100, 100, lambda v: f"{v}%", scale=100)
         self._slider(form, "Animation", "animation_ms", 0, 400, 170,
                      lambda v: "Off" if v == 0 else f"{v} ms", step=10)
-        sp = QSpinBox()
-        sp.setRange(4, 100)
-        sp.setToolTip("Up to 12 fit one ring; more spill into outer rings (10, 16, 22, 28 …)")
-        sp.setValue(int(self.cfg.get("max_segments", 16)))
-        sp.valueChanged.connect(lambda v: self.set("max_segments", v))
-        form.addRow("Most formats shown", sp)
-        left.addWidget(g)
+        c.add_layout(form)
+        left.addWidget(c)
 
         # Behaviour
-        g = QGroupBox("Behaviour")
-        form = QFormLayout(g)
+        c = Card("Behaviour")
+        form = QFormLayout()
         pos = QComboBox()
         pos.addItem("At the mouse cursor", "cursor")
         pos.addItem("Centre of the screen", "center")
         pos.setCurrentIndex(max(0, pos.findData(self.cfg.get("position", "cursor"))))
         pos.currentIndexChanged.connect(lambda _: self.set("position", pos.currentData()))
         form.addRow("Open", pos)
+        c.add_layout(form)
         for key, label in (("show_category_labels", "Show the category name on the hovered format"),
                            ("show_caption", "Show the file name below the wheel"),
                            ("close_on_focus_loss", "Close when I click somewhere else")):
             cb = QCheckBox(label)
             cb.setChecked(bool(self.cfg.get(key, True)))
             cb.toggled.connect(lambda v, k=key: self.set(k, v))
-            form.addRow(cb)
-        dwell_on = QCheckBox("Convert by hovering (no click needed)")
-        dwell_on.setChecked(int(self.cfg.get("dwell_select_ms", 0)) > 0)
-        form.addRow(dwell_on)
-        dwell_w, self.dwell = labeled_slider(300, 2000, max(300, int(self.cfg.get("dwell_select_ms", 0))
-                                                            or 700), lambda v: f"{v} ms", step=50)
-        self.dwell.setEnabled(dwell_on.isChecked())
-        form.addRow("Hover time", dwell_w)
-
-        def dwell_changed(*_):
-            self.dwell.setEnabled(dwell_on.isChecked())
-            self.set("dwell_select_ms", self.dwell.value() if dwell_on.isChecked() else 0)
-        dwell_on.toggled.connect(dwell_changed)
-        self.dwell.valueChanged.connect(dwell_changed)
-        self._slider(form, "Show result for", "done_delay_ms", 300, 3000, 900,
+            c.add(cb)
+        form2 = QFormLayout()
+        self._slider(form2, "Show result for", "done_delay_ms", 300, 3000, 900,
                      lambda v: f"{v / 1000:.1f} s", step=100)
-        left.addWidget(g)
+        c.add_layout(form2)
+        left.addWidget(c)
+
+        tip = QLabel("Want more formats per ring, or to convert just by hovering? That's in Advanced.")
+        tip.setWordWrap(True)
+        tip.setStyleSheet("color: palette(placeholder-text);")
+        left.addWidget(tip)
+
         reset = QPushButton("Reset wheel settings")
         reset.clicked.connect(self._reset)
         left.addWidget(reset, 0, Qt.AlignmentFlag.AlignLeft)
@@ -968,12 +967,17 @@ class AppearancePage(Page):
             self.cfg[k] = copy.deepcopy(config.DEFAULTS[k])
         self.win.flush()
         self.win.rebuild_page(self)
+        adv = self.win.page_of(AdvancedPage)
+        if adv is not None:
+            adv.sync_wheel_internals()
 
     def refresh(self):
         self.preview.apply_cfg(self.cfg)
 
 
 class FormatsPage(Page):
+    """Every conversion ShapeShifter offers, and a switch to hide any of them from the wheel."""
+
     def __init__(self, win):
         super().__init__(win)
         b = self.body
@@ -1005,6 +1009,7 @@ class FormatsPage(Page):
         row.addWidget(ident)
         b.addLayout(row)
         self.summary = QLabel()
+        self.summary.setStyleSheet("color: palette(placeholder-text);")
         b.addWidget(self.summary)
 
         self.tree = QTreeWidget()
@@ -1018,180 +1023,9 @@ class FormatsPage(Page):
         self.tree.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
         self.tree.customContextMenuRequested.connect(self._context_menu)
         b.addWidget(self.tree, 1)
-
-        # ---- conversion graph: route finder + export
-        g = QGroupBox("Conversion graph")
-        gl = QVBoxLayout(g)
-        from . import planner
-        nodes, edges = planner.graph_nodes_edges()
-        self.graph_info = QLabel(f"{len(nodes)} file types connected by {len(edges)} one-way "
-                                 f"conversion steps ({sum(e.latent for e in edges)} only used "
-                                 "inside routes). Multi-step conversions are found by searching "
-                                 "this graph.")
-        self.graph_info.setWordWrap(True)
-        gl.addWidget(self.graph_info)
-        row = QHBoxLayout()
-        all_fmts = sorted(nodes - {"extract"})
-        self.route_from, self.route_to = QComboBox(), QComboBox()
-        for cb, default in ((self.route_from, "md"), (self.route_to, "pem")):
-            cb.setEditable(True)
-            cb.addItems(all_fmts)
-            cb.setCurrentText(default)
-            cb.setMinimumWidth(110)
-        row.addWidget(QLabel("Find a route from"))
-        row.addWidget(self.route_from)
-        row.addWidget(QLabel("to"))
-        row.addWidget(self.route_to)
-        go = QPushButton("Find")
-        go.clicked.connect(self._find_route)
-        row.addWidget(go)
-        row.addStretch(1)
-        for text, fmt in (("Export graph (DOT)…", "dot"), ("Export graph (JSON)…", "json")):
-            btn = QPushButton(text)
-            btn.clicked.connect(lambda _=False, f=fmt: self._export_graph(f))
-            row.addWidget(btn)
-        gl.addLayout(row)
-        self.route_result = QLabel("")
-        self.route_result.setWordWrap(True)
-        self.route_result.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
-        gl.addWidget(self.route_result)
-        b.addWidget(g)
-
-        # ---- learned reverse conversions
-        g = QGroupBox("Learned reverse conversions")
-        gl = QVBoxLayout(g)
-        self.learn_cb = QCheckBox("After converting A → B, offer B → A on B files next time "
-                                  "(best effort — may lose data)")
-        self.learn_cb.setChecked(bool(self.cfg.get("learn_reverse", True)))
-        self.learn_cb.toggled.connect(lambda v: self.set("learn_reverse", v))
-        gl.addWidget(self.learn_cb)
-        self.learned_list = QListWidget()
-        self.learned_list.setMaximumHeight(110)
-        gl.addWidget(self.learned_list)
-        row = QHBoxLayout()
-        forget = QPushButton("Forget selected")
-        forget.clicked.connect(self._forget_learned)
-        clear = QPushButton("Forget all")
-        clear.clicked.connect(self._clear_learned)
-        row.addWidget(forget)
-        row.addWidget(clear)
-        row.addStretch(1)
-        gl.addLayout(row)
-        b.addWidget(g)
-
-        g = QGroupBox("Custom formats — teach ShapeShifter a format without code")
-        gl = QVBoxLayout(g)
-        note = QLabel("Describe how to recognise a file (its first bytes or a text pattern) and how "
-                      "to read it (it's really another format, has one embedded, or holds "
-                      "records/lines that become a table). Its conversions then appear "
-                      "automatically. Inspect a file and use “Describe this format…” to start "
-                      "from that file.")
-        note.setWordWrap(True)
-        gl.addWidget(note)
-        self.custom_list = QListWidget()
-        self.custom_list.setMaximumHeight(120)
-        self.custom_list.itemDoubleClicked.connect(
-            lambda it: open_path(it.data(Qt.ItemDataRole.UserRole)))
-        gl.addWidget(self.custom_list)
-        row = QHBoxLayout()
-        for text, fn in (("New description…", self._new_custom), ("Open folder", self._open_custom),
-                         ("Reload", self._reload_custom)):
-            btn = QPushButton(text)
-            btn.clicked.connect(fn)
-            row.addWidget(btn)
-        row.addStretch(1)
-        gl.addLayout(row)
-        b.addWidget(g)
-        self.refresh()
-
-    def _fill_custom(self):
-        from . import custom
-        self.custom_list.clear()
-        specs = custom.load_specs()
-        if not specs:
-            self.custom_list.addItem("(none yet)")
-        for s in specs:
-            text = (f"⚠ {s.path.name}: {s.error}" if s.error else
-                    f"{s.name} (.{s.id}) — {s.kind}"
-                    + (f" → {s.decode.get('as', '').upper()}" if s.kind in ("alias", "embedded") else
-                       " → table"))
-            it = QListWidgetItem(text)
-            it.setData(Qt.ItemDataRole.UserRole, str(s.path))
-            self.custom_list.addItem(it)
-
-    def _find_route(self):
-        from . import planner
-        from .formats import canonical
-        a, b = canonical(self.route_from.currentText()), canonical(self.route_to.currentText())
-        opt = planner.route(a, b, conditional=True)
-        if not opt:
-            self.route_result.setText(f"No route from {a.upper()} to {b.upper()}.")
-            return
-        if planner.is_conditional(opt):
-            self.route_result.setText(
-                " → ".join([a.upper()] + [e.dst.upper() for e in opt.path])
-                + f"\n⚠ {'; '.join(opt.warnings)}\nFor an actual file, ShapeShifter checks its "
-                  "content: if it really is that format, the direct conversion is offered.")
-            return
-        steps = " → ".join([a.upper()] + [f"{e.dst.upper()} ({e.backend.name}"
-                                          + (", latent" if e.latent else "") + ")" for e in opt.path])
-        warn = f"\n⚠ {'; '.join(opt.warnings)}" if opt.warnings else ""
-        shown = "" if opt in planner.plan(a).values() else \
-            "\n(Not offered on the wheel by default; available once learned or from the command line.)"
-        self.route_result.setText(f"{steps}{warn}{shown}")
-
-    def _export_graph(self, fmt: str):
-        from PySide6.QtWidgets import QFileDialog
-        from . import planner
-        path, _ = QFileDialog.getSaveFileName(self, "Export conversion graph",
-                                              f"shapeshifter-graph.{fmt}",
-                                              "Graphviz (*.dot)" if fmt == "dot" else "JSON (*.json)")
-        if path:
-            n = planner.export_graph(path, fmt)
-            self.route_result.setText(f"Exported {n} conversion steps to {path}")
-
-    def _fill_learned(self):
-        from . import learned
-        self.learned_list.clear()
-        items = learned.pairs()
-        if not items:
-            self.learned_list.addItem("(nothing learned yet — convert something)")
-        for a, b, info in items:
-            it = QListWidgetItem(f"{a.upper()} → {b.upper()}   (learned from {b.upper()} → "
-                                 f"{a.upper()}, used {info.get('count', 1)}×)")
-            it.setData(Qt.ItemDataRole.UserRole, (a, b))
-            self.learned_list.addItem(it)
-
-    def _forget_learned(self):
-        from . import learned
-        it = self.learned_list.currentItem()
-        if it and it.data(Qt.ItemDataRole.UserRole):
-            learned.forget(*it.data(Qt.ItemDataRole.UserRole))
-            self._fill_learned()
-
-    def _clear_learned(self):
-        from . import learned
-        learned.clear()
-        self._fill_learned()
-
-    def _new_custom(self):
-        from . import custom
-        open_path(custom.create_template())
-        self._fill_custom()
-
-    def _open_custom(self):
-        from . import custom
-        custom.FORMATS_DIR.mkdir(parents=True, exist_ok=True)
-        open_path(custom.FORMATS_DIR)
-
-    def _reload_custom(self):
-        from . import custom
-        custom.reload()
         self.refresh()
 
     def refresh(self):
-        self._fill_custom()
-        self._fill_learned()
         hidden = set(self.cfg.get("hidden_pairs", []))
         self.tree.blockSignals(True)
         self.tree.clear()
@@ -1312,11 +1146,11 @@ ENGINE_INFO = {
                  "ZIP, 7z, TAR, TAR.GZ/BZ2/XZ and Extract here. Unsafe archives are refused.",
                  None, None),
     "native": ("ShapeShifter native converters",
-               "Written from scratch, no third-party code: PNG, BMP, TGA, PPM, QOI, ICO, GIF and "
+               "Written from scratch, no third-party code: PNG, BMP, TGA, QOI, ICO, GIF and "
                "baseline JPEG decoding, PDF writing, Markdown ↔ HTML ↔ text, WAV ↔ AIFF.",
                None, None),
     "custom": ("Your format descriptions",
-               "Formats you described in Settings › Formats & mappings › Custom formats.",
+               "Formats you described in Settings › Advanced › Custom formats.",
                None, None),
     "magika": ("Magika (optional AI file detector)",
                "Google's model for identifying files nothing else recognises. "
@@ -1358,6 +1192,8 @@ def _brew() -> str | None:
 
 
 class EnginesPage(Page):
+    """What's installed and what each engine is for — mainly useful when a conversion is missing."""
+
     def __init__(self, win):
         super().__init__(win)
         b = self.body
@@ -1397,9 +1233,10 @@ class EnginesPage(Page):
         for name, ok in entries:
             title, desc, winget, url = ENGINE_INFO.get(name, (name, "", None, None))
             card = QFrame()
-            card.setFrameShape(QFrame.Shape.StyledPanel)
+            card.setObjectName("Card")
+            card.setStyleSheet(CARD_QSS)
             lay = QHBoxLayout(card)
-            lay.setContentsMargins(14, 10, 14, 10)
+            lay.setContentsMargins(16, 12, 16, 12)
             dot = QLabel("●")
             dot.setStyleSheet(f"color: {'#2fbf71' if ok else '#e5484d'}; font-size: 18px;")
             lay.addWidget(dot)
@@ -1526,18 +1363,275 @@ class EnginesPage(Page):
         self.win.refresh_all()
 
 
+class AdvancedPage(Page):
+    """Everything that isn't needed day to day: conversion quality, the OCR language, the wheel's
+    ring size and hover-to-convert, learned reverse conversions, custom formats, and exporting the
+    conversion graph. Nothing here is required for ShapeShifter to work well out of the box."""
+
+    def __init__(self, win):
+        super().__init__(win)
+        b = self.body
+        b.addWidget(heading("Advanced", "Fine-tuning for conversion quality and ShapeShifter's own "
+                                        "extension points. Most people never need this page."))
+
+        c = Card("Conversion quality")
+        form = QFormLayout()
+        for key, label, lo in (("jpeg_quality", "JPEG quality", 50), ("webp_quality", "WEBP quality", 50),
+                               ("avif_quality", "AVIF / HEIC quality", 30)):
+            w, s = labeled_slider(lo, 100, int(self.cfg[key]), lambda v: f"{v}")
+            s.valueChanged.connect(lambda v, k=key: self.set(k, v))
+            form.addRow(label, w)
+        dpi = QComboBox()
+        for v in (72, 96, 150, 200, 300, 600):
+            dpi.addItem(f"{v} DPI", v)
+        dpi.setCurrentIndex(max(0, dpi.findData(int(self.cfg["render_dpi"]))))
+        dpi.currentIndexChanged.connect(lambda _: self.set("render_dpi", dpi.currentData()))
+        form.addRow("PDF → image resolution", dpi)
+        c.add_layout(form)
+        nat = QCheckBox("Prefer ShapeShifter's own converters (PNG, BMP, TGA, QOI, ICO, GIF/JPEG "
+                        "decoding, PDF, Markdown/HTML/text, WAV/AIFF, XLSX) over libraries")
+        nat.setToolTip("Native converters need no third-party code but are slower on big files. "
+                       "Anything they can't handle still falls back to the libraries.")
+        nat.setChecked(bool(self.cfg.get("prefer_native", False)))
+        nat.toggled.connect(self._toggle_native)
+        c.add(nat)
+        b.addWidget(c)
+
+        c = Card("Text recognition language")
+        form = QFormLayout()
+        self.ocr_lang = QComboBox()
+        self._fill_ocr_languages()
+        self.ocr_lang.currentIndexChanged.connect(
+            lambda _: self.set("ocr_language", self.ocr_lang.currentData() or "auto"))
+        row = QWidget()
+        rl = QHBoxLayout(row)
+        rl.setContentsMargins(0, 0, 0, 0)
+        rl.addWidget(self.ocr_lang, 1)
+        detect = QPushButton("Detect languages")
+        detect.clicked.connect(self._detect_ocr_languages)
+        rl.addWidget(detect)
+        form.addRow("Language", row)
+        c.add_layout(form)
+        self.ocr_note = QLabel(
+            "Uses the text recognition built into macOS. “Automatic” works out the language by itself." if IS_MAC else
+            "Uses Windows' built-in OCR; add languages in Windows Settings › Time "
+            "& language › Language & region. “Automatic” uses your Windows languages.")
+        self.ocr_note.setWordWrap(True)
+        self.ocr_note.setStyleSheet("color: palette(placeholder-text);")
+        c.add(self.ocr_note)
+        b.addWidget(c)
+
+        c = Card("Wheel internals")
+        form = QFormLayout()
+        self.max_segments_spin = QSpinBox()
+        self.max_segments_spin.setRange(4, 100)
+        self.max_segments_spin.setToolTip("Up to 12 fit one ring; more spill into outer rings (10, 16, 22, 28 …)")
+        self.max_segments_spin.setValue(int(self.cfg.get("max_segments", 16)))
+        self.max_segments_spin.valueChanged.connect(lambda v: self.set("max_segments", v))
+        form.addRow("Most formats shown", self.max_segments_spin)
+        c.add_layout(form)
+        self.dwell_on = QCheckBox("Convert by hovering (no click needed)")
+        self.dwell_on.setChecked(int(self.cfg.get("dwell_select_ms", 0)) > 0)
+        c.add(self.dwell_on)
+        dwell_w, self.dwell_slider = labeled_slider(
+            300, 2000, max(300, int(self.cfg.get("dwell_select_ms", 0)) or 700), lambda v: f"{v} ms", step=50)
+        self.dwell_slider.setEnabled(self.dwell_on.isChecked())
+        dform = QFormLayout()
+        dform.addRow("Hover time", dwell_w)
+        c.add_layout(dform)
+
+        def dwell_changed(*_):
+            self.dwell_slider.setEnabled(self.dwell_on.isChecked())
+            self.set("dwell_select_ms", self.dwell_slider.value() if self.dwell_on.isChecked() else 0)
+        self.dwell_on.toggled.connect(dwell_changed)
+        self.dwell_slider.valueChanged.connect(dwell_changed)
+        b.addWidget(c)
+
+        c = Card("Learned reverse conversions", "After converting A → B, ShapeShifter can offer B → A on "
+                "B files next time (best effort — may lose data).")
+        self.learn_cb = QCheckBox("Learn reverse conversions")
+        self.learn_cb.setChecked(bool(self.cfg.get("learn_reverse", True)))
+        self.learn_cb.toggled.connect(lambda v: self.set("learn_reverse", v))
+        c.add(self.learn_cb)
+        row = QHBoxLayout()
+        self.learned_count = QLabel("")
+        self.learned_count.setStyleSheet("color: palette(placeholder-text);")
+        row.addWidget(self.learned_count, 1)
+        forget = QPushButton("Forget all")
+        forget.clicked.connect(self._clear_learned)
+        row.addWidget(forget)
+        c.add_layout(row)
+        b.addWidget(c)
+
+        c = Card("Custom formats", "Teach ShapeShifter a format without code: describe how to recognise a "
+                "file and how to read it, and its conversions appear automatically. Inspect a file and "
+                "use “Describe this format…” to start from it.")
+        self.custom_list = QListWidget()
+        self.custom_list.setMaximumHeight(110)
+        self.custom_list.setFrameShape(QFrame.Shape.NoFrame)
+        self.custom_list.itemDoubleClicked.connect(
+            lambda it: open_path(it.data(Qt.ItemDataRole.UserRole)))
+        c.add(self.custom_list)
+        row = QHBoxLayout()
+        for text, fn in (("New description…", self._new_custom), ("Open folder", self._open_custom),
+                         ("Reload", self._reload_custom)):
+            btn = QPushButton(text)
+            btn.clicked.connect(fn)
+            row.addWidget(btn)
+        row.addStretch(1)
+        c.add_layout(row)
+        b.addWidget(c)
+
+        c = Card("Conversion graph")
+        from . import planner
+        nodes, edges = planner.graph_nodes_edges()
+        info = QLabel(f"{len(nodes)} file types connected by {len(edges)} one-way conversion steps "
+                     f"({sum(e.latent for e in edges)} only used inside routes). The interactive "
+                     "graph, with its own route finder, is in Settings › Graph.")
+        info.setWordWrap(True)
+        c.add(info)
+        row = QHBoxLayout()
+        for text, fmt in (("Export graph (DOT)…", "dot"), ("Export graph (JSON)…", "json")):
+            btn = QPushButton(text)
+            btn.clicked.connect(lambda _=False, f=fmt: self._export_graph(f))
+            row.addWidget(btn)
+        row.addStretch(1)
+        c.add_layout(row)
+        self.graph_export_result = QLabel("")
+        self.graph_export_result.setWordWrap(True)
+        self.graph_export_result.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
+        c.add(self.graph_export_result)
+        b.addWidget(c)
+
+        b.addStretch(1)
+        self.refresh()
+
+    # ---- conversion quality / native converters ----
+
+    def _toggle_native(self, on: bool):
+        from . import planner
+        self.set("prefer_native", on)
+        self.win.flush()
+        planner.reset()
+
+    # ---- OCR language ----
+
+    def _fill_ocr_languages(self):
+        self.ocr_lang.blockSignals(True)
+        self.ocr_lang.clear()
+        self.ocr_lang.addItem("Automatic" if IS_MAC else "Automatic (Windows languages)", "auto")
+        for tag, name in config.load_state().get("ocr_langs", []):
+            self.ocr_lang.addItem(f"{name} ({tag})", tag)
+        current = self.cfg.get("ocr_language", "auto")
+        i = self.ocr_lang.findData(current)
+        if i < 0:                                   # a language we haven't detected: keep it visible
+            self.ocr_lang.addItem(f"{current} (not detected)", current)
+            i = self.ocr_lang.count() - 1
+        self.ocr_lang.setCurrentIndex(i)
+        self.ocr_lang.blockSignals(False)
+
+    def _detect_ocr_languages(self):
+        from PySide6.QtGui import QCursor
+        from . import ocr
+        QApplication.setOverrideCursor(QCursor(Qt.CursorShape.WaitCursor))
+        try:
+            info = ocr.status()
+        finally:
+            QApplication.restoreOverrideCursor()
+        config.save_state(ocr_langs=[list(t) for t in info["languages"]])
+        self._fill_ocr_languages()
+        self.ocr_note.setText(
+            f"Found {len(info['languages'])} OCR language(s): "
+            + ", ".join(n for _, n in info["languages"]) if info["ok"] else info["error"])
+
+    # ---- wheel internals (kept in sync with "Reset wheel settings" on the Wheel page) ----
+
+    def sync_wheel_internals(self):
+        self.max_segments_spin.blockSignals(True)
+        self.max_segments_spin.setValue(int(self.cfg.get("max_segments", 16)))
+        self.max_segments_spin.blockSignals(False)
+        self.dwell_on.blockSignals(True)
+        self.dwell_on.setChecked(int(self.cfg.get("dwell_select_ms", 0)) > 0)
+        self.dwell_on.blockSignals(False)
+        self.dwell_slider.blockSignals(True)
+        self.dwell_slider.setValue(max(300, int(self.cfg.get("dwell_select_ms", 0)) or 700))
+        self.dwell_slider.blockSignals(False)
+        self.dwell_slider.setEnabled(self.dwell_on.isChecked())
+
+    # ---- learned reverse conversions ----
+
+    def _fill_learned(self):
+        from . import learned
+        items = learned.pairs()
+        self.learned_count.setText(f"{len(items)} learned pair(s)." if items else "Nothing learned yet.")
+
+    def _clear_learned(self):
+        from . import learned
+        learned.clear()
+        self._fill_learned()
+
+    # ---- custom formats ----
+
+    def _fill_custom(self):
+        from . import custom
+        self.custom_list.clear()
+        specs = custom.load_specs()
+        if not specs:
+            self.custom_list.addItem("(none yet)")
+        for s in specs:
+            text = (f"⚠ {s.path.name}: {s.error}" if s.error else
+                    f"{s.name} (.{s.id}) — {s.kind}"
+                    + (f" → {s.decode.get('as', '').upper()}" if s.kind in ("alias", "embedded") else
+                       " → table"))
+            it = QListWidgetItem(text)
+            it.setData(Qt.ItemDataRole.UserRole, str(s.path))
+            self.custom_list.addItem(it)
+
+    def _new_custom(self):
+        from . import custom
+        open_path(custom.create_template())
+        self._fill_custom()
+
+    def _open_custom(self):
+        from . import custom
+        custom.FORMATS_DIR.mkdir(parents=True, exist_ok=True)
+        open_path(custom.FORMATS_DIR)
+
+    def _reload_custom(self):
+        from . import custom
+        custom.reload()
+        self.refresh()
+
+    # ---- conversion graph export ----
+
+    def _export_graph(self, fmt: str):
+        from PySide6.QtWidgets import QFileDialog
+        from . import planner
+        path, _ = QFileDialog.getSaveFileName(self, "Export conversion graph",
+                                              f"shapeshifter-graph.{fmt}",
+                                              "Graphviz (*.dot)" if fmt == "dot" else "JSON (*.json)")
+        if path:
+            n = planner.export_graph(path, fmt)
+            self.graph_export_result.setText(f"Exported {n} conversion steps to {path}")
+
+    def refresh(self):
+        self._fill_custom()
+        self._fill_learned()
+
+
 class AboutPage(Page):
     def __init__(self, win):
         super().__init__(win)
         b = self.body
         b.addWidget(heading(APP_NAME, f"Version {__version__}"))
         from . import COPYRIGHT, LICENSE_NAME, SOURCE_URL
+
+        c = Card()
         info = QLabel(f"Convert files in place from {FILE_MANAGER} with a radial wheel.\n\n"
-                      f"{COPYRIGHT}\nLicence: {LICENSE_NAME}\nSource code: {SOURCE_URL}\n\n"
-                      f"Settings file: {config.CONFIG_FILE}\nLog file: {config.LOG_FILE}")
+                      f"{COPYRIGHT}\nLicence: {LICENSE_NAME}")
         info.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
         info.setWordWrap(True)
-        b.addWidget(info)
+        c.add(info)
         app_dir = Path(sys.executable).parent
 
         def open_doc(name):
@@ -1553,7 +1647,10 @@ class AboutPage(Page):
             btn.clicked.connect(fn)
             legal.addWidget(btn)
         legal.addStretch(1)
-        b.addLayout(legal)
+        c.add_layout(legal)
+        b.addWidget(c)
+
+        c = Card("Updates")
         upd = QHBoxLayout()
         check = QPushButton("Check for updates…")
         check.clicked.connect(self._check_updates)
@@ -1563,7 +1660,15 @@ class AboutPage(Page):
         upd.addWidget(check)
         upd.addWidget(auto)
         upd.addStretch(1)
-        b.addLayout(upd)
+        c.add_layout(upd)
+        b.addWidget(c)
+
+        c = Card("Troubleshooting")
+        paths = QLabel(f"Settings file: {config.CONFIG_FILE}\nLog file: {config.LOG_FILE}")
+        paths.setWordWrap(True)
+        paths.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
+        paths.setStyleSheet("color: palette(placeholder-text);")
+        c.add(paths)
         row = QHBoxLayout()
         actions = [("Open settings file", lambda: open_path(config.CONFIG_FILE)),
                    ("Open log", lambda: config.LOG_FILE.exists() and open_path(config.LOG_FILE)),
@@ -1575,7 +1680,8 @@ class AboutPage(Page):
             btn.clicked.connect(fn)
             row.addWidget(btn)
         row.addStretch(1)
-        b.addLayout(row)
+        c.add_layout(row)
+        b.addWidget(c)
         b.addStretch(1)
 
     def _check_updates(self):
@@ -1609,9 +1715,12 @@ class AboutPage(Page):
 
 from .graph_view import GraphPage  # noqa: E402
 
-PAGES = [("General", GeneralPage), ("Hotkeys", HotkeysPage), ("Wheel", AppearancePage),
-         ("Formats & mappings", FormatsPage), ("Graph", GraphPage), ("Engines", EnginesPage),
-         ("About", AboutPage)]
+# The nav is two groups: PRIMARY_PAGES (always visible) and, below a divider, ADVANCED_PAGES (the
+# stuff most people never touch). About is on its own, pinned to the bottom, as usual.
+PRIMARY_PAGES = [("General", GeneralPage), ("Wheel", WheelPage), ("Hotkeys", HotkeysPage),
+                 ("Formats", FormatsPage), ("Engines", EnginesPage)]
+ADVANCED_PAGES = [("Advanced", AdvancedPage), ("Graph", GraphPage)]
+ABOUT_PAGES = [("About", AboutPage)]
 
 
 class SettingsWindow(QWidget):
@@ -1627,35 +1736,101 @@ class SettingsWindow(QWidget):
         lay = QHBoxLayout(self)
         lay.setContentsMargins(0, 0, 0, 0)
         lay.setSpacing(0)
-        self.nav = QListWidget()
-        self.nav.setFixedWidth(200)
-        self.nav.setFrameShape(QFrame.Shape.NoFrame)
-        self.nav.setFocusPolicy(Qt.FocusPolicy.NoFocus)
-        self.nav.setStyleSheet("QListWidget { padding-top: 16px; background: palette(window); outline: 0; }"
-                               "QListWidget::item { padding: 10px 18px; border-radius: 6px; margin: 2px 8px; }"
-                               "QListWidget::item:selected { background: palette(highlight);"
-                               " color: palette(highlighted-text); }")
-        lay.addWidget(self.nav)
+
+        nav_col = QWidget()
+        nav_col.setFixedWidth(208)
+        nav_col.setStyleSheet("background: palette(window); border-right: 1px solid palette(mid);")
+        navlay = QVBoxLayout(nav_col)
+        navlay.setContentsMargins(0, 0, 0, 0)
+        navlay.setSpacing(0)
+
+        header = QWidget()
+        hl = QHBoxLayout(header)
+        hl.setContentsMargins(18, 18, 18, 14)
+        hl.setSpacing(10)
+        icon_lbl = QLabel()
+        try:
+            from .icon import ensure_icon
+            icon_lbl.setPixmap(QIcon(str(ensure_icon())).pixmap(26, 26))
+        except Exception:
+            log.exception("Settings header icon failed")
+        hl.addWidget(icon_lbl)
+        name_lbl = QLabel(APP_NAME)
+        f = name_lbl.font()
+        f.setWeight(QFont.Weight.Bold)
+        f.setPointSizeF(f.pointSizeF() * 1.15)
+        name_lbl.setFont(f)
+        hl.addWidget(name_lbl)
+        hl.addStretch(1)
+        navlay.addWidget(header)
+
+        self.nav_primary = self._nav_list([t for t, _ in PRIMARY_PAGES])
+        navlay.addWidget(self.nav_primary)
+        navlay.addWidget(nav_divider("ADVANCED"))
+        self.nav_advanced = self._nav_list([t for t, _ in ADVANCED_PAGES])
+        navlay.addWidget(self.nav_advanced)
+        navlay.addStretch(1)
+        navlay.addWidget(nav_divider())
+        self.nav_about = self._nav_list([t for t, _ in ABOUT_PAGES])
+        navlay.addWidget(self.nav_about)
+        navlay.addSpacing(12)
+
+        lay.addWidget(nav_col)
         self.stack = QStackedWidget()
         lay.addWidget(self.stack, 1)
-        for name, cls in PAGES:
-            self.nav.addItem(name)
+        for _, cls in PRIMARY_PAGES + ADVANCED_PAGES + ABOUT_PAGES:
             self.stack.addWidget(cls(self))
-        self.nav.currentRowChanged.connect(self._page_changed)
-        self.nav.setCurrentRow(0)
 
-    def _page_changed(self, row):
-        self.stack.setCurrentIndex(row)
+        self._nav_map = {
+            self.nav_primary: list(range(0, len(PRIMARY_PAGES))),
+            self.nav_advanced: list(range(len(PRIMARY_PAGES), len(PRIMARY_PAGES) + len(ADVANCED_PAGES))),
+            self.nav_about: [len(PRIMARY_PAGES) + len(ADVANCED_PAGES)],
+        }
+        for lw in self._nav_map:
+            lw.currentRowChanged.connect(lambda row, w=lw: self._select(w, row))
+        self.nav_primary.setCurrentRow(0)
+
+    def _nav_list(self, labels: list[str]) -> QListWidget:
+        lw = QListWidget()
+        lw.setFrameShape(QFrame.Shape.NoFrame)
+        lw.setFocusPolicy(Qt.FocusPolicy.NoFocus)
+        lw.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        lw.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        lw.setStyleSheet(NAV_QSS)
+        for text in labels:
+            item = QListWidgetItem(text)
+            item.setSizeHint(QSize(100, 38))
+            lw.addItem(item)
+        lw.setFixedHeight(38 * len(labels) + 4)
+        return lw
+
+    def _select(self, which: QListWidget, row: int):
+        if row < 0:
+            return
+        for lw in self._nav_map:
+            if lw is not which and lw.currentRow() != -1:
+                lw.blockSignals(True)
+                lw.setCurrentRow(-1)
+                lw.blockSignals(False)
+        idx = self._nav_map[which][row]
+        self.stack.setCurrentIndex(idx)
         page = self.stack.currentWidget()
-        if isinstance(page, (HotkeysPage, FormatsPage, AppearancePage)):
+        if isinstance(page, (HotkeysPage, FormatsPage, WheelPage, AdvancedPage)):
             page.refresh()
+
+    def page_of(self, cls):
+        for i in range(self.stack.count()):
+            w = self.stack.widget(i)
+            if isinstance(w, cls):
+                return w
+        return None
 
     def set_value(self, key, value):
         self.cfg[key] = value
         self._save_timer.start()
         for i in range(self.stack.count()):
             page = self.stack.widget(i)
-            if isinstance(page, AppearancePage):
+            if isinstance(page, WheelPage):
                 page.preview.apply_cfg(self.cfg)
 
     def flush(self):
@@ -1668,19 +1843,21 @@ class SettingsWindow(QWidget):
 
     def rebuild_page(self, page):
         idx = self.stack.indexOf(page)
+        was_current = self.stack.currentIndex() == idx
         cls = type(page)
         new = cls(self)
         self.stack.insertWidget(idx, new)
         self.stack.removeWidget(page)
         page.deleteLater()
-        self.stack.setCurrentIndex(idx)
+        if was_current:
+            self.stack.setCurrentIndex(idx)
+        return new
 
     def rebuild_all(self):
-        row = self.nav.currentRow()
+        idx = self.stack.currentIndex()
         for i in range(self.stack.count()):
             self.rebuild_page(self.stack.widget(i))
-        self.nav.setCurrentRow(row)
-        self.stack.setCurrentIndex(row)
+        self.stack.setCurrentIndex(idx)
 
     def closeEvent(self, e):
         global _window

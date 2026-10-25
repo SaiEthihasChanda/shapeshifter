@@ -93,8 +93,8 @@ you select a B file, A appears on the wheel, labelled *Learned* with a warning b
 no proper converter, it uses the best route the graph can find, even a lossy one. For example,
 after PEM → MD, an MD file offers PEM via MD → text → PEM.
 
-Manage these under Settings › Formats & mappings › *Learned reverse conversions*. You can
-switch learning off there, or forget individual pairs.
+Manage these under Settings › Advanced › *Learned reverse conversions*. You can
+switch learning off there, or forget them all.
 
 ## The conversion graph
 
@@ -115,7 +115,7 @@ offered on their own; they only complete routes such as learned reverse conversi
 - **Flat view:** scroll to zoom, drag the background to pan, and drag dots around. **Spread out** runs an animated spring layout.
 - **Search** for a type, **show a route** from A to B (highlighted in orange), filter by category, or hide latent steps (dashed).
 
-The route finder and DOT/JSON export are also under Settings › Formats & mappings.
+The route finder is also in Settings › Graph (type a route and click *Show route*). DOT/JSON export is under Settings › Advanced.
 
 ## How files are recognised
 
@@ -143,7 +143,7 @@ lists and non-Latin text come along:
 | Markdown / HTML / text → **DOCX** | pandoc if installed, otherwise ShapeShifter's own Word writer (headings, bold/italic/code, links, lists, tables, quotes, pictures). |
 
 PDF → PNG/JPG/WEBP/TIFF renders each page exactly as MuPDF displays it, with pictures, transparency,
-vectors, annotations and form fields (checked pixel-for-pixel). Resolution is *Settings › General ›
+vectors, annotations and form fields (checked pixel-for-pixel). Resolution is *Settings › Advanced ›
 PDF → image resolution* (150 DPI by default; raise it for sharper text). Rasterising can't keep
 selectable text or links: use PDF → SVG or *OCR PDF* when you need those.
 
@@ -165,7 +165,7 @@ Language & region).
 | Scanned PDF | **OCR PDF** | Adds the text layer to pages that have none. |
 | Scanned PDF | TXT, HTML, DOCX, Markdown | Pages without a text layer are recognised automatically. |
 
-Set the language under *Settings › General › Text recognition* ("Automatic" uses your Windows
+Set the language under *Settings › Advanced › Text recognition language* ("Automatic" uses your Windows
 languages), and use *Settings › Engines › Test OCR* to check it works. OCR is for printed text;
 handwriting is unreliable, and tables, columns and form boxes are not reconstructed. The
 recognised text can contain mistakes, so those wheel options carry an amber **!** badge.
@@ -294,13 +294,13 @@ lossy route, including **multi-step** routes such as comic → PDF → PNG pages
 | 7-Zip (optional) | RAR, ISO, CAB, WIM, DMG, VHD(X), … |
 | pandoc / LibreOffice (optional) | Rich documents: DOCX, ODT, EPUB, PPTX, XLS, … (pandoc and LibreOffice win over the built-in readers when installed) |
 
-*Settings › General › Prefer ShapeShifter's own converters* routes through the native
+*Settings › Advanced › Prefer ShapeShifter's own converters* routes through the native
 engine first. Anything it can't handle, such as a progressive JPEG or a very large
 image, falls back to the libraries automatically.
 
 ## Teach it a new format
 
-Settings › Formats & mappings › **Custom formats**, or **Inspect › Describe this format…**
+Settings › Advanced › **Custom formats**, or **Inspect › Describe this format…**
 for a template pre-filled from a sample file. A description is a small YAML file in
 `%APPDATA%\ShapeShifter\formats\`:
 
@@ -334,14 +334,19 @@ The tray icon shows a notification, and an **Update to x.y.z…** entry, when a 
 
 ## Settings app
 
+The nav is grouped: the five pages most people use, then — below a divider — the ones only
+power users need (*Advanced*, *Graph*), with *About* pinned to the bottom.
+
 | Page | Contents |
 |---|---|
-| General | Original file (Recycle Bin / keep / delete), keep modified date, prefer native, quality, PDF DPI, OCR language, start with Windows, right-click entry |
+| General | Original file (Recycle Bin / keep / delete), keep modified date, start with Windows, right-click entry (and, on a Mac, the two permissions hotkeys need) |
+| Wheel | Six themes, accent colour, size, text size, opacity, animation, position, live preview |
 | Hotkeys | Keyboard and mouse shortcuts: record by pressing them, with conflict detection and live status |
-| Wheel | Six themes, accent colour, size, text size, opacity, animation, position, hover-to-convert, live preview |
-| Formats & mappings | Every source → target with engine, route and loss notes. Hide any pair. *Identify a file…*, custom formats, learned conversions, route finder, graph export. |
-| Graph | The interactive conversion graph: explore, search, highlight routes, toggle steps on or off the wheel |
+| Formats & mappings | Every source → target with engine, route and loss notes. Hide any pair. *Identify a file…* |
 | Engines | What's installed. One-click install for ffmpeg, LibreOffice, pandoc, Magika. *Test OCR* checks Windows text recognition and lists its languages. |
+| Advanced | Quality and PDF DPI, prefer native converters, OCR language, the wheel's ring size and hover-to-convert, learned reverse conversions, custom formats, conversion graph export |
+| Graph | The interactive conversion graph: explore, search, highlight routes, toggle steps on or off the wheel |
+| About | Version, licence, updates, settings/log files, reset |
 
 ## Command line
 

@@ -302,7 +302,7 @@ class CustomFormatBackend(Backend):
 
 TEMPLATE = """\
 # ShapeShifter format description. Edit, save, then press "Reload" in
-# Settings > Formats & mappings (or restart the tray app).
+# Settings > Advanced (or restart the tray app).
 # Reference: every option is explained at the top of shapeshifter/custom.py.
 
 id: {id}

@@ -1,5 +1,9 @@
 # Changelog
 
+## Unreleased
+- **Settings redesigned**: every page is now built from the same card-based look (instead of the OS's native group boxes), so it reads as one consistent app in both light and dark mode. The side list is grouped: General, Wheel, Hotkeys, Formats and Engines are always shown; Advanced and Graph sit below a divider for when you need them; About is pinned to the bottom.
+- **A new Advanced page** collects the settings most people never touch: JPEG/WEBP/AVIF quality and PDF resolution, "prefer native converters," the OCR language picker, the wheel's ring size and hover-to-convert, learned reverse conversions, custom formats, and exporting the conversion graph (DOT/JSON). General, Wheel and Formats & mappings keep only what everyday use needs; the in-page route finder and graph export on the old Formats page are gone (the Graph page already covers routes, with a working 3D view).
+
 ## 2.9.0
 - **ShapeShifter for Mac** (Apple Silicon, macOS 12+): the same app as on Windows. A menu-bar app with **right-click › Quick Actions › Convert with ShapeShifter** in Finder, hotkeys (**⌃⌥C**) and mouse triggers over Finder and the desktop, the wheel, Fill form, Properties, every converter, text recognition with the one built into macOS, the Trash for originals, and updates that install themselves. Download `ShapeShifter-macOS.dmg`.
 - Settings on a Mac show whether the Accessibility and Automation permissions the hotkeys need are on, with buttons to the right System Settings page; the Engines page installs ffmpeg, pandoc, LibreOffice and 7-Zip with Homebrew.
